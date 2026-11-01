@@ -24,7 +24,7 @@ assert.match(source, /Lampa\./, 'Lampa must recognize this file as an extension'
     collectionSet:()=>{},collectionFocus:(node)=>{window.focusCalls++;$(node).trigger('hover:focus');}},
    Select:{show:options=>{window.selection=options;}},
    Scroll:function(){const wrap=$('<div class="scroll scroll--over"><div class="scroll__content"><div class="scroll__body"></div></div></div>');const body=wrap.find('.scroll__body');this.render=()=>wrap;this.body=()=>body;this.append=e=>body.append(e);this.update=()=>{};this.destroy=()=>wrap.remove();},
-   Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok,fail)=>{window.requestURL=url;setTimeout(()=>window.failRequest || (window.failSchedule && url.indexOf('espn.com') >= 0) ? fail() : ok(url.indexOf('/leagues/dropdown') >= 0 ? {leagues:[{id:'3321',slug:'event'}]} : url.indexOf('/scoreboard') >= 0 ? {events:window.scheduleFixture || (window.fixture.events || []).filter(e=>e.idLeague==='4443').map(e=>({id:e.idEvent,name:e.strEvent,date:e.dateEvent+'T21:00Z'}))} : window.fixture),0);};}
+   Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok,fail)=>{window.requestURL=url;setTimeout(()=>window.failRequest || (window.failSchedule && url.indexOf('espn.com') >= 0) ? fail() : ok(url.indexOf('/eventsday.php') >= 0 ? (window.artFixture || {events:[]}) : url.indexOf('/leagues/dropdown') >= 0 ? {leagues:[{id:'3321',slug:'event'}]} : url.indexOf('/scoreboard') >= 0 ? {events:window.scheduleFixture || (window.fixture.events || []).filter(e=>e.idLeague==='4443').map(e=>({id:e.idEvent,name:e.strEvent,date:e.dateEvent+'T21:00Z'}))} : window.fixture),0);};}
   };
  });
  await page.evaluate(()=>{window.savedLampa=window.Lampa;delete window.Lampa;setTimeout(()=>{window.Lampa=window.savedLampa;},100);});
@@ -83,6 +83,15 @@ assert.match(source, /Lampa\./, 'Lampa must recognize this file as an extension'
  await page.waitForFunction(()=>$('.events-status').text().includes('неполным'));
  await page.evaluate(()=>{window.failSchedule=false;$('.events-toolbar .selector').last().trigger('hover:enter');});
  await page.waitForFunction(()=>$('.events-card').length===20);
+ // Artwork outside the first fifteen events is fetched independently by date.
+ await page.route('https://artwork.test/**',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="30"><rect width="20" height="30" fill="blue"/></svg>'}));
+ await page.evaluate(()=>{
+  window.artFixture={events:[{idEvent:'art',idLeague:'4443',strEvent:'EVENT 119',dateEvent:'2026-10-10',strPoster:'https://artwork.test/poster.svg'}]};
+  $('.events-toolbar .selector').last().trigger('hover:enter');
+ });
+ await page.waitForSelector('.events-card:first-child .events-poster img');
+ await page.waitForFunction(()=>document.querySelector('.events-poster img').naturalWidth>0);
+ assert.equal(await page.locator('.events-poster img').first().getAttribute('src'),'https://artwork.test/poster.svg');
  await page.evaluate(()=>catalog.destroy());
  assert.equal(await page.locator('.events-catalog').count(),0);
  console.log('PASS: startup, cards, sorting, deduplication, spoiler omission, search handoff, date search, navigation, error, retry, empty response, cleanup.');

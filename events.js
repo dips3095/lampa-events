@@ -1,4 +1,4 @@
-/* Events for Lampa, v0.1.5. */
+/* Events for Lampa, v0.1.6. */
 (function () {
     'use strict';
     if (window.events_catalog_loaded || window.events_catalog_loading) return;
@@ -7,6 +7,7 @@
     var $ = window.jQuery || window.$;
     var cache = {};
     var scheduleLeague;
+    var artworkCache = {};
 
     function normalize(events) {
         var seen = Object.create(null);
@@ -53,6 +54,11 @@
         var root = $('<div class="events-catalog"></div>');
         var scroll = new L.Scroll({mask: true, over: true});
         var net = new L.Reguest();
+        var artNet = new L.Reguest();
+        var artQueue = [];
+        var artBusy = 0;
+        var artToken = 0;
+        var artObserver;
         var last = null;
         var dead = false;
         var started = false;
@@ -60,6 +66,72 @@
         var active = false;
         root.append(scroll.render());
         if (scroll.minus) scroll.minus();
+
+        function resetArtwork() {
+            artToken++;
+            artNet.clear();
+            artQueue = [];
+            artBusy = 0;
+            if (artObserver) artObserver.disconnect();
+            artObserver = null;
+        }
+        function artwork(event, poster) {
+            var queued = false;
+            var expectedToken = artToken;
+            function show(url) {
+                if (!url) return;
+                event.poster = url;
+                var img = $('<img alt="">').attr('src', url);
+                img.on('error', function () { $(this).remove(); });
+                poster.append(img);
+            }
+            function request() {
+                if (queued || dead || expectedToken !== artToken) return;
+                queued = true;
+                var cached = artworkCache[event.date];
+                if (cached && Date.now() - cached.time < 900000) { show(cached.url); return; }
+                artQueue.push({date: event.date, token: artToken, show: show});
+                pumpArtwork();
+            }
+            if (event.poster) { show(event.poster); return; }
+            poster.parent().on('hover:focus', request);
+            poster[0].loadArtwork = request;
+            if (artObserver) artObserver.observe(poster[0]);
+            else if (poster.parent().index() < 10) request();
+        }
+        function pumpArtwork() {
+            while (!dead && artBusy < 2 && artQueue.length) {
+                (function (task) {
+                    artBusy++;
+                    var settled = false;
+                    function complete(url, cacheable) {
+                        if (settled || dead || task.token !== artToken) return;
+                        settled = true;
+                        artBusy--;
+                        if (cacheable) artworkCache[task.date] = {url: url, time: Date.now()};
+                        task.show(url);
+                        pumpArtwork();
+                    }
+                    function lookup(date, retry) {
+                        artNet.timeout(8000);
+                        artNet.native('https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=' + date + '&l=4443',
+                            function (data) {
+                                if (dead || task.token !== artToken) return;
+                                if (!data || (data.events !== null && !Array.isArray(data.events))) { complete('', false); return; }
+                                var events = normalize(data.events).filter(function (event) { return event.date === date; });
+                                var found = events.filter(function (e) { return e.poster; })[0];
+                                if (found) complete(found.poster, true);
+                                else if (!events.length && retry) {
+                                    var previous = new Date(task.date + 'T12:00:00Z');
+                                    previous.setUTCDate(previous.getUTCDate() - 1);
+                                    lookup(previous.toISOString().slice(0, 10), false);
+                                } else complete('', true);
+                            }, function () { complete('', false); });
+                    }
+                    lookup(task.date, true);
+                }(artQueue.shift()));
+            }
+        }
 
         function button(text, handler, target) {
             var el = $('<div class="selector events-button"></div>').text(text);
@@ -82,11 +154,12 @@
                 onBack: function () { self.start(); }});
         }
         function header(message) {
+            resetArtwork();
             last = null;
             scroll.body().empty();
             var bar = $('<div class="events-toolbar"></div>');
             button('Год: ' + year, chooseYear, bar);
-            button('Обновить', function () { delete cache[year]; load(); }, bar);
+            button('Обновить', function () { delete cache[year]; artworkCache = {}; load(); }, bar);
             scroll.append(bar);
             scroll.append($('<div class="events-status"></div>').text(message));
         }
@@ -101,18 +174,23 @@
             if (dead) return;
             header(notice || (events.length ? 'Выберите турнир. Наличие записи проверяется при поиске.' : 'За этот год турниры не найдены. Выберите другой год.'));
             var grid = $('<div class="events-grid"></div>');
+            if (window.IntersectionObserver) artObserver = new IntersectionObserver(function (entries, observer) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) {
+                        observer.unobserve(entry.target);
+                        entry.target.loadArtwork();
+                    }
+                });
+            }, {root: root[0], rootMargin: '200px'});
             var today = new Date().toISOString().slice(0, 10);
             events.forEach(function (event) {
                 var card = button('', function () { select(event); }, grid).addClass('events-card');
-                var poster = $('<div class="events-poster"><span>EVENTS</span></div>');
-                if (event.poster) {
-                    var img = $('<img alt="">').attr('src', event.poster);
-                    img.on('error', function () { $(this).remove(); });
-                    poster.append(img);
-                }
+                var poster = $('<div class="events-poster"><span></span></div>');
+                poster.find('span').text(query(event) + '\nАфиша пока недоступна');
                 card.append(poster);
                 card.append($('<div class="events-title"></div>').text(event.title));
                 card.append($('<div class="events-date"></div>').text(event.date + (event.date > today ? ' · Предстоящий' : '')));
+                artwork(event, poster);
             });
             scroll.append(grid);
             focus();
@@ -200,7 +278,7 @@
             if (!started) { started = true; load(); }
         };
         this.pause = this.stop = function () { active = false; };
-        this.destroy = function () { dead = true; net.clear(); scroll.destroy(); root.remove(); };
+        this.destroy = function () { dead = true; net.clear(); resetArtwork(); scroll.destroy(); root.remove(); };
     }
 
     function install() {
@@ -220,7 +298,7 @@
             ".events-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1.2em;padding:.3em .3em 3em}",
             ".events-card{padding:.5em;min-width:0}",
             ".events-poster{position:relative;height:0;padding-top:150%;background:#252525;overflow:hidden;border-radius:.3em}",
-            ".events-poster span{position:absolute;top:50%;left:0;width:100%;transform:translateY(-50%);text-align:center;font-size:1.5em;font-weight:bold;color:#d8212a}",
+            ".events-poster span{position:absolute;top:50%;left:0;width:100%;transform:translateY(-50%);text-align:center;font-size:1em;line-height:1.6;font-weight:bold;color:#c4c9d2;white-space:pre-line;padding:1em;box-sizing:border-box}",
             ".events-poster img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}",
             ".events-title{margin-top:.6em;font-size:.9em;line-height:1.3;min-height:2.6em;max-height:2.6em;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:break-word}",
             ".events-date{opacity:.65;font-size:.75em;margin-top:.4em;line-height:1.4}"
