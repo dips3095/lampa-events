@@ -21,3 +21,7 @@
 ## Публикация
 
 GitHub Actions публикует только `events.js` и `index.html` при изменении `main`. В Settings → Pages источником должен быть GitHub Actions. Если автоматическое включение Pages запрещено, владелец должен включить его один раз.
+
+## Проверки
+
+`node --check events.js` проверяет синтаксис. Для браузерных проверок установите `npm install --no-save playwright jquery`, затем `npx playwright install chromium` и выполните `node tests/smoke.cjs`. Для системного Chromium можно задать `CHROMIUM_PATH`.

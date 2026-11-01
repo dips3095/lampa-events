@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
  await page.setContent('<div class="menu"><ul class="menu__list"></ul></div><main></main>');
  await page.addScriptTag({path: process.env.JQUERY_PATH || require.resolve('jquery/dist/jquery.js')});
  await page.evaluate(() => {
-  window.appready = true;
+  window.appready = true;window.controllerName='content';window.focusCalls=0;
   window.fixture = {events: [
    {idEvent:'1', idLeague:'4443',strEvent:'EVENT 311 Main Event',dateEvent:'2025-01-19',strDescriptionEN:'SPOILER'},
    {idEvent:'2', idLeague:'4443',strEvent:'EVENT Evening 249',dateEvent:'2025-01-11'},
@@ -17,8 +17,8 @@ const assert = require('node:assert/strict');
   window.Lampa = {
    Component:{add:(name,ctor)=>{window.Catalog=ctor;}},
    Activity:{push:data=>{window.pushed=data;},backward:()=>{}},
-   Controller:{add:(name,c)=>{window.controller=c;},toggle:()=>window.controller.toggle(),
-    collectionSet:()=>{},collectionFocus:(node)=>{$(node).trigger('hover:focus');}},
+   Controller:{add:(name,c)=>{window.controller=c;},enabled:()=>({name:window.controllerName}),toggle:()=>{window.controllerName='content';window.controller.toggle();},
+    collectionSet:()=>{},collectionFocus:(node)=>{window.focusCalls++;$(node).trigger('hover:focus');}},
    Select:{show:options=>{window.selection=options;}},
    Scroll:function(){const body=$('<div>');this.render=this.body=()=>body;this.append=e=>body.append(e);this.update=()=>{};this.destroy=()=>body.remove();},
    Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok,fail)=>{window.requestURL=url;setTimeout(()=>window.failRequest?fail():ok(window.fixture),0);};}
@@ -38,6 +38,11 @@ const assert = require('node:assert/strict');
  await page.evaluate(()=>{$('.events-card').last().trigger('hover:enter');selection.onSelect(selection.items[1]);});
  assert.equal(await page.evaluate(()=>pushed.search),'EVENT 2025.01.11');
  await page.evaluate(()=>{$('.events-card').first().trigger('hover:focus');controller.right();});
+ // A completed network request must not steal focus from a modal.
+ await page.evaluate(()=>{window.controllerName='select';window.beforeFocus=window.focusCalls;$('.events-toolbar .selector').last().trigger('hover:enter');});
+ await page.waitForFunction(()=>$('.events-card').length===2);
+ assert.equal(await page.evaluate(()=>window.focusCalls),await page.evaluate(()=>window.beforeFocus));
+ await page.evaluate(()=>{window.controllerName='content';});
  // Switch to a fresh year and exercise the failure/retry state.
  await page.evaluate(()=>{window.failRequest=true;$('.events-toolbar .selector').first().trigger('hover:enter');selection.onSelect({year:2024});});
  await page.waitForFunction(()=>$('.events-status').text().includes('Не удалось'));
