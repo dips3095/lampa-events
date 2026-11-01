@@ -1,4 +1,4 @@
-/* Events for Lampa, v0.1.3. */
+/* Events for Lampa, v0.1.4. */
 (function () {
     'use strict';
     if (window.events_catalog_loaded || window.events_catalog_loading) return;
@@ -6,6 +6,7 @@
     var L = window.Lampa;
     var $ = window.jQuery || window.$;
     var cache = {};
+    var scheduleLeague;
 
     function normalize(events) {
         var seen = Object.create(null);
@@ -17,6 +18,21 @@
         }).map(function (e) {
             return {id: String(e.idEvent), title: e.strEvent.trim(), date: e.dateEvent,
                 poster: /^https:\/\//.test(e.strPoster || e.strThumb || '') ? (e.strPoster || e.strThumb) : ''};
+        }).sort(function (a, b) { return b.date.localeCompare(a.date); });
+    }
+
+    function scheduleEvents(events, posters) {
+        var seen = Object.create(null);
+        return events.filter(function (e) {
+            if (!e || !e.id || typeof e.name !== 'string' || typeof e.date !== 'string' ||
+                !/^\d{4}-\d{2}-\d{2}T/.test(e.date) || seen[e.id]) return false;
+            if (e.name.toLowerCase().indexOf(scheduleLeague + ' ') !== 0) return false;
+            seen[e.id] = true;
+            return true;
+        }).map(function (e) {
+            var date = e.date.slice(0, 10);
+            var poster = posters.filter(function (p) { return p.date === date; })[0];
+            return {id: String(e.id), title: e.name, date: date, poster: poster ? poster.poster : ''};
         }).sort(function (a, b) { return b.date.localeCompare(a.date); });
     }
 
@@ -80,9 +96,9 @@
                 onSelect: function (item) { search(event, item.query); },
                 onBack: function () { self.start(); }});
         }
-        function display(events) {
+        function display(events, notice) {
             if (dead) return;
-            header(events.length ? 'Выберите турнир. Наличие записи проверяется при поиске.' : 'За этот год турниры не найдены. Выберите другой год.');
+            header(notice || (events.length ? 'Выберите турнир. Наличие записи проверяется при поиске.' : 'За этот год турниры не найдены. Выберите другой год.'));
             var grid = $('<div class="events-grid"></div>');
             var today = new Date().toISOString().slice(0, 10);
             events.forEach(function (event) {
@@ -104,23 +120,56 @@
             var id = ++ticket;
             net.clear();
             if (cache[year] && Date.now() - cache[year].time < 900000) return display(cache[year].events);
-            header('Загрузка турниров…');
+            header('Загрузка событий…');
             focus();
             net.timeout(15000);
-            net.native('https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id=4443&s=' + year,
-                function (data) {
-                    if (dead || id !== ticket) return;
-                    if (!data || !Object.prototype.hasOwnProperty.call(data, 'events') ||
-                        (data.events !== null && !Array.isArray(data.events))) return failed();
-                    var events = normalize(data.events);
+            var pending = 2;
+            var posters = [];
+            var schedule = null;
+            var backupOK = false;
+            function current() { return !dead && id === ticket; }
+            function finish() {
+                if (!current() || --pending) return;
+                if (schedule !== null) {
+                    var events = scheduleEvents(schedule, posters);
                     cache[year] = {time: Date.now(), events: events};
                     display(events);
-                }, failed);
-            function failed() {
-                if (dead || id !== ticket) return;
-                header('Не удалось загрузить каталог TheSportsDB. Нажмите «Обновить» или попробуйте позже.');
-                focus();
+                } else if (backupOK) {
+                    display(posters, 'Основное расписание недоступно. Резервный каталог может быть неполным. Нажмите «Обновить», чтобы повторить.');
+                } else {
+                    header('Не удалось загрузить каталог. Нажмите «Обновить» или попробуйте позже.');
+                    focus();
+                }
             }
+            net.native('https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id=4443&s=' + year,
+                function (data) {
+                    if (!current()) return;
+                    if (data && (data.events === null || Array.isArray(data.events))) {
+                        posters = normalize(data.events);
+                        backupOK = true;
+                    }
+                    finish();
+                }, finish);
+            function fetchSchedule() {
+                if (!current()) return;
+                net.native('https://site.api.espn.com/apis/site/v2/sports/mma/' + encodeURIComponent(scheduleLeague) + '/scoreboard?dates=' + year + '&limit=1000',
+                    function (data) {
+                        if (!current()) return;
+                        if (data && Array.isArray(data.events)) schedule = data.events;
+                        finish();
+                    }, finish);
+            }
+            if (scheduleLeague) fetchSchedule();
+            else net.native('https://site.api.espn.com/apis/site/v2/leagues/dropdown?region=us&lang=en&sport=mma',
+                function (data) {
+                    if (!current()) return;
+                    var leagues = data && Array.isArray(data.leagues) ? data.leagues : [];
+                    var league = leagues.filter(function (item) { return String(item.id) === '3321'; })[0];
+                    if (league && typeof league.slug === 'string' && /^[a-z0-9-]+$/.test(league.slug)) {
+                        scheduleLeague = league.slug;
+                        fetchSchedule();
+                    } else finish();
+                }, finish);
         }
         function move(direction) {
             var nodes = root.find('.selector');

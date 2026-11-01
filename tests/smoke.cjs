@@ -24,7 +24,7 @@ assert.match(source, /Lampa\./, 'Lampa must recognize this file as an extension'
     collectionSet:()=>{},collectionFocus:(node)=>{window.focusCalls++;$(node).trigger('hover:focus');}},
    Select:{show:options=>{window.selection=options;}},
    Scroll:function(){const body=$('<div>');this.render=this.body=()=>body;this.append=e=>body.append(e);this.update=()=>{};this.destroy=()=>body.remove();},
-   Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok,fail)=>{window.requestURL=url;setTimeout(()=>window.failRequest?fail():ok(window.fixture),0);};}
+   Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok,fail)=>{window.requestURL=url;setTimeout(()=>window.failRequest || (window.failSchedule && url.indexOf('espn.com') >= 0) ? fail() : ok(url.indexOf('/leagues/dropdown') >= 0 ? {leagues:[{id:'3321',slug:'event'}]} : url.indexOf('/scoreboard') >= 0 ? {events:window.scheduleFixture || (window.fixture.events || []).filter(e=>e.idLeague==='4443').map(e=>({id:e.idEvent,name:e.strEvent,date:e.dateEvent+'T21:00Z'}))} : window.fixture),0);};}
   };
  });
  await page.evaluate(()=>{window.savedLampa=window.Lampa;delete window.Lampa;setTimeout(()=>{window.Lampa=window.savedLampa;},100);});
@@ -51,6 +51,18 @@ assert.match(source, /Lampa\./, 'Lampa must recognize this file as an extension'
  await page.waitForFunction(()=>$('.events-status').text().includes('Не удалось'));
  await page.evaluate(()=>{window.failRequest=false;window.fixture={events:null};$('.events-toolbar .selector').last().trigger('hover:enter');});
  await page.waitForFunction(()=>$('.events-status').text().includes('не найдены'));
+ // A complete source must retain events after the first fifteen and after May.
+ await page.evaluate(()=>{
+  window.scheduleFixture=Array.from({length:20},(_,i)=>({id:String(i+100),name:'EVENT '+(i+100),date:'2026-'+(i<10?'06':'10')+'-'+String(i%10+1).padStart(2,'0')+'T21:00Z'}));
+  $('.events-toolbar .selector').last().trigger('hover:enter');
+ });
+ await page.waitForFunction(()=>$('.events-card').length===20);
+ assert.match(await page.locator('.events-date').first().innerText(),/^2026-10/);
+ // A fallback response must never masquerade as a complete cached season.
+ await page.evaluate(()=>{window.failSchedule=true;window.fixture={events:[{idEvent:'backup',idLeague:'4443',strEvent:'EVENT 1',dateEvent:'2026-01-01'}]};$('.events-toolbar .selector').last().trigger('hover:enter');});
+ await page.waitForFunction(()=>$('.events-status').text().includes('неполным'));
+ await page.evaluate(()=>{window.failSchedule=false;$('.events-toolbar .selector').last().trigger('hover:enter');});
+ await page.waitForFunction(()=>$('.events-card').length===20);
  await page.evaluate(()=>catalog.destroy());
  assert.equal(await page.locator('.events-catalog').count(),0);
  console.log('PASS: startup, cards, sorting, deduplication, spoiler omission, search handoff, date search, navigation, error, retry, empty response, cleanup.');
