@@ -1,5 +1,8 @@
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
+const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../events.js'), 'utf8');
+// Lampa's extension checker recognizes scripts by this literal API prefix.
+assert.match(source, /Lampa\./, 'Lampa must recognize this file as an extension');
 (async () => {
  const browser = await chromium.launch({executablePath: process.env.CHROMIUM_PATH, args: ['--no-sandbox']});
  try {
