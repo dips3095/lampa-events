@@ -1,21 +1,21 @@
-/* Events for Lampa, v0.1.1. */
+/* Events for Lampa, v0.1.2. */
 (function () {
     'use strict';
-    if (window.events_catalog_loaded) return;
-    window.events_catalog_loaded = true;
+    if (window.events_catalog_loaded || window.events_catalog_loading) return;
+    window.events_catalog_loading = true;
     var L = window.Lampa;
     var $ = window.jQuery || window.$;
     var cache = {};
 
     function normalize(events) {
-        var seen = {};
+        var seen = Object.create(null);
         return (events || []).filter(function (e) {
-            if (!e || String(e.idLeague) !== '4443' || !e.strEvent ||
+            if (!e || String(e.idLeague) !== '4443' || typeof e.strEvent !== 'string' || !e.strEvent.trim() || !e.idEvent ||
                 !/^\d{4}-\d{2}-\d{2}$/.test(e.dateEvent || '') || seen[e.idEvent]) return false;
             seen[e.idEvent] = true;
             return true;
         }).map(function (e) {
-            return {id: String(e.idEvent), title: e.strEvent, date: e.dateEvent,
+            return {id: String(e.idEvent), title: e.strEvent.trim(), date: e.dateEvent,
                 poster: /^https:\/\//.test(e.strPoster || e.strThumb || '') ? (e.strPoster || e.strThumb) : ''};
         }).sort(function (a, b) { return b.date.localeCompare(a.date); });
     }
@@ -53,6 +53,7 @@
         }
         function focus() {
             if (dead || !active) return;
+            if (L.Controller.enabled && L.Controller.enabled().name !== 'content') return;
             L.Controller.collectionSet(root);
             L.Controller.collectionFocus(last || root.find('.selector')[0], root);
         }
@@ -153,13 +154,22 @@
     }
 
     function install() {
-        if (!L || !$) return;
+        if (!L || !$ || window.events_catalog_loaded) return;
+        window.events_catalog_loaded = true;
+        window.events_catalog_loading = false;
         L.Component.add('events_catalog', Catalog);
         $('<style>').text('.events-catalog{height:100%}.events-toolbar{display:flex;gap:1em;margin-bottom:1em}.events-button{padding:.7em;border-radius:.4em;background:rgba(255,255,255,.08)}.events-button.focus{outline:.18em solid #fff;background:#a71920}.events-status{opacity:.7;margin-bottom:1.2em}.events-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1.2em;padding:.3em .3em 3em}.events-card{padding:.5em}.events-poster{position:relative;aspect-ratio:2/3;height:16em;background:#252525;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:.3em}.events-poster span{font-size:2em;font-weight:bold;color:#d8212a}.events-poster img{position:absolute;width:100%;height:100%;object-fit:cover}.events-title{margin-top:.6em;font-size:.9em;line-height:1.3}.events-date{opacity:.65;font-size:.75em;margin-top:.4em}').appendTo('head');
         var menu = $('<li class="menu__item selector"><div class="menu__ico"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 4h18v16H3z"/><text x="4" y="15" font-size="8" fill="#111">EV</text></svg></div><div class="menu__text">События</div></li>');
         menu.on('hover:enter', function () { L.Activity.push({url: '', title: 'События', component: 'events_catalog', page: 1}); });
         $('.menu .menu__list').first().append(menu);
     }
-    if (window.appready) install();
-    else if (L) L.Listener.follow('app', function (event) { if (event.type === 'ready') install(); });
+    var attempts = 0;
+    function ready() {
+        L = window.Lampa;
+        $ = window.jQuery || window.$;
+        if (L && $ && window.appready && $('.menu .menu__list').length) install();
+        else if (++attempts < 120) setTimeout(ready, 500);
+        else window.events_catalog_loading = false;
+    }
+    ready();
 }());
