@@ -1,4 +1,4 @@
-/* Events for Lampa, v0.1.4. */
+/* Events for Lampa, v0.1.5. */
 (function () {
     'use strict';
     if (window.events_catalog_loaded || window.events_catalog_loading) return;
@@ -59,6 +59,7 @@
         var ticket = 0;
         var active = false;
         root.append(scroll.render());
+        if (scroll.minus) scroll.minus();
 
         function button(text, handler, target) {
             var el = $('<div class="selector events-button"></div>').text(text);
@@ -207,7 +208,23 @@
         window.events_catalog_loaded = true;
         window.events_catalog_loading = false;
         window.Lampa.Component.add('events_catalog', Catalog);
-        $('<style>').text('.events-catalog{height:100%}.events-toolbar{display:flex;gap:1em;margin-bottom:1em}.events-button{padding:.7em;border-radius:.4em;background:rgba(255,255,255,.08)}.events-button.focus{outline:.18em solid #fff;background:#a71920}.events-status{opacity:.7;margin-bottom:1.2em}.events-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1.2em;padding:.3em .3em 3em}.events-card{padding:.5em}.events-poster{position:relative;aspect-ratio:2/3;height:16em;background:#252525;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:.3em}.events-poster span{font-size:2em;font-weight:bold;color:#d8212a}.events-poster img{position:absolute;width:100%;height:100%;object-fit:cover}.events-title{margin-top:.6em;font-size:.9em;line-height:1.3}.events-date{opacity:.65;font-size:.75em;margin-top:.4em}').appendTo('head');
+        $('<style>').text([
+            ".events-catalog{height:100%;width:100%;min-width:0;padding:0 1.5em;box-sizing:border-box}",
+            ".events-catalog .scroll{width:100%;height:100%}",
+            ".events-catalog .scroll__content{min-width:0;box-sizing:border-box}",
+            ".events-catalog .scroll__body{padding:.3em 0 2em;box-sizing:border-box}",
+            ".events-toolbar{display:flex;gap:1em;margin-bottom:1em;padding:.3em}",
+            ".events-button{padding:.7em;border-radius:.4em;background:rgba(255,255,255,.08);box-sizing:border-box}",
+            ".events-button.focus{outline:.18em solid #fff;background:#a71920}",
+            ".events-status{opacity:.7;margin:0 .3em 1.2em;line-height:1.4;overflow-wrap:break-word}",
+            ".events-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1.2em;padding:.3em .3em 3em}",
+            ".events-card{padding:.5em;min-width:0}",
+            ".events-poster{position:relative;height:0;padding-top:150%;background:#252525;overflow:hidden;border-radius:.3em}",
+            ".events-poster span{position:absolute;top:50%;left:0;width:100%;transform:translateY(-50%);text-align:center;font-size:1.5em;font-weight:bold;color:#d8212a}",
+            ".events-poster img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}",
+            ".events-title{margin-top:.6em;font-size:.9em;line-height:1.3;min-height:2.6em;max-height:2.6em;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:break-word}",
+            ".events-date{opacity:.65;font-size:.75em;margin-top:.4em;line-height:1.4}"
+        ].join('')).appendTo('head');
         var menu = $('<li class="menu__item selector"><div class="menu__ico"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 4h18v16H3z"/><text x="4" y="15" font-size="8" fill="#111">EV</text></svg></div><div class="menu__text">События</div></li>');
         menu.on('hover:enter', function () { L.Activity.push({url: '', title: 'События', component: 'events_catalog', page: 1}); });
         $('.menu .menu__list').first().append(menu);

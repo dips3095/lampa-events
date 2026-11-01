@@ -23,7 +23,7 @@ assert.match(source, /Lampa\./, 'Lampa must recognize this file as an extension'
    Controller:{add:(name,c)=>{window.controller=c;},enabled:()=>({name:window.controllerName}),toggle:()=>{window.controllerName='content';window.controller.toggle();},
     collectionSet:()=>{},collectionFocus:(node)=>{window.focusCalls++;$(node).trigger('hover:focus');}},
    Select:{show:options=>{window.selection=options;}},
-   Scroll:function(){const body=$('<div>');this.render=this.body=()=>body;this.append=e=>body.append(e);this.update=()=>{};this.destroy=()=>body.remove();},
+   Scroll:function(){const wrap=$('<div class="scroll scroll--over"><div class="scroll__content"><div class="scroll__body"></div></div></div>');const body=wrap.find('.scroll__body');this.render=()=>wrap;this.body=()=>body;this.append=e=>body.append(e);this.update=()=>{};this.destroy=()=>wrap.remove();},
    Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok,fail)=>{window.requestURL=url;setTimeout(()=>window.failRequest || (window.failSchedule && url.indexOf('espn.com') >= 0) ? fail() : ok(url.indexOf('/leagues/dropdown') >= 0 ? {leagues:[{id:'3321',slug:'event'}]} : url.indexOf('/scoreboard') >= 0 ? {events:window.scheduleFixture || (window.fixture.events || []).filter(e=>e.idLeague==='4443').map(e=>({id:e.idEvent,name:e.strEvent,date:e.dateEvent+'T21:00Z'}))} : window.fixture),0);};}
   };
  });
@@ -58,6 +58,26 @@ assert.match(source, /Lampa\./, 'Lampa must recognize this file as an extension'
  });
  await page.waitForFunction(()=>$('.events-card').length===20);
  assert.match(await page.locator('.events-date').first().innerText(),/^2026-10/);
+ // Match Lampa's scroll wrapper and check safe margins at TV resolutions.
+ await page.addStyleTag({content:'.menu{display:none}html,body{margin:0;background:#111b2b;color:#fff;font-family:Arial}main{height:calc(100vh - 100px);margin-top:100px}.scroll{display:flex;overflow:hidden}.scroll__content{width:100%;padding:2.5em 0}.scroll__body{position:relative}'});
+ for (const [width,height,font] of [[1280,720,16],[1920,1080,24],[3840,2160,48]]) {
+  await page.setViewportSize({width,height});
+  await page.evaluate(font=>{document.body.style.fontSize=font+'px';$('.events-toolbar .selector').first().addClass('focus');},font);
+  const geometry=await page.evaluate(()=>{
+   const root=document.querySelector('.events-catalog').getBoundingClientRect();
+   const toolbar=document.querySelector('.events-toolbar').getBoundingClientRect();
+   const status=document.querySelector('.events-status').getBoundingClientRect();
+   const cards=Array.from(document.querySelectorAll('.events-card')).slice(0,5).map(e=>e.getBoundingClientRect().toJSON());
+   const poster=document.querySelector('.events-poster').getBoundingClientRect();
+   return {root:root.toJSON(),toolbar:toolbar.toJSON(),status:status.toJSON(),cards,ratio:poster.height/poster.width,overflow:document.documentElement.scrollWidth>innerWidth};
+  });
+  assert.ok(geometry.toolbar.left-geometry.root.left >= font,'Toolbar needs a safe left margin');
+  assert.ok(geometry.status.left-geometry.root.left >= font,'Status needs a safe left margin');
+  assert.equal(geometry.overflow,false,'No horizontal overflow');
+  assert.ok(Math.abs(geometry.ratio-1.5)<0.02,'Posters retain 2:3 ratio');
+  assert.ok(geometry.cards.every(c=>c.right<geometry.root.right && Math.abs(c.top-geometry.cards[0].top)<1),'Five cards fit in the row');
+ }
+ if(process.env.LAYOUT_SCREENSHOT) await page.screenshot({path:process.env.LAYOUT_SCREENSHOT});
  // A fallback response must never masquerade as a complete cached season.
  await page.evaluate(()=>{window.failSchedule=true;window.fixture={events:[{idEvent:'backup',idLeague:'4443',strEvent:'EVENT 1',dateEvent:'2026-01-01'}]};$('.events-toolbar .selector').last().trigger('hover:enter');});
  await page.waitForFunction(()=>$('.events-status').text().includes('неполным'));
