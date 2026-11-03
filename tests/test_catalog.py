@@ -3,7 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from catalog import classify, parse_archive, parse_detail, reconcile, norm, validate
+from catalog import START_YEAR, classify, parse_archive, parse_detail, scoped_page, reconcile, norm, validate
 from artwork import matching
 
 
@@ -57,13 +57,26 @@ class CatalogTests(unittest.TestCase):
 
     def test_missing_year_or_removed_event_blocks_publication(self):
         from datetime import datetime, timezone
-        entries=[{'id':str(y),'title':'Event','date':str(y)+'-01-01','series':'numbered','status':'completed','participants':['A','B'],'images':[]} for y in range(1993,datetime.now(timezone.utc).year+1)]
+        entries=[{'id':str(y),'title':'Event','date':str(y)+'-01-01','series':'numbered','status':'completed','participants':['A','B'],'images':[]} for y in range(START_YEAR,datetime.now(timezone.utc).year+1)]
         data={'schemaVersion':1,'events':entries}
         validate(data)
         changed=copy.deepcopy(data);changed['events'].pop(3)
         with self.assertRaises(ValueError):validate(changed,data)
         changed=copy.deepcopy(data);changed['events'][0]['winner']='A'
         with self.assertRaises(ValueError):validate(changed)
+
+        # Explicit scope migration may drop old years, but never an in-range event.
+        previous=copy.deepcopy(data)
+        previous['events'].append({**entries[0],'id':'old','date':'2009-12-31'})
+        validate(data,previous)
+        with self.assertRaises(ValueError):validate(previous)
+
+    def test_archive_boundary_stops_before_old_detail_requests(self):
+        rows=[{'id':'future','date':'2027-01-01'},{'id':'boundary','date':'2010-01-01'},{'id':'old','date':'2009-12-31'}]
+        selected,next_url=scoped_page(rows,'https://www.sherdog.com/older')
+        self.assertEqual([e['id'] for e in selected],['future','boundary'])
+        self.assertIsNone(next_url)
+        self.assertEqual(scoped_page(rows[:2],'next')[1],'next')
 
 
 if __name__ == '__main__': unittest.main()

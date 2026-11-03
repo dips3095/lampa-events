@@ -15,6 +15,10 @@ const fixture = {
  }))
 };
 assert.ok(helpers.valid(fixture));
+const migrated=helpers.scopeCatalog({...fixture,events:[...fixture.events,{...fixture.events[0],id:'old',date:'2009-12-31'},{...fixture.events[0],id:'boundary',date:'2010-01-01'}]});
+assert.ok(!migrated.events.some(e=>e.id==='old'));
+assert.ok(migrated.events.some(e=>e.id==='boundary'));
+assert.equal(migrated.startYear,2010);
 assert.ok(helpers.matches(fixture.events[79],'махачёв',{}));
 assert.ok(helpers.matches(fixture.events[79],'Jose',{}));
 assert.ok(!helpers.matches(fixture.events[0],'10',{}));

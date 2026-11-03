@@ -2,6 +2,7 @@
 (function () {
     'use strict';
     var DATA_URL = 'https://dips3095.github.io/lampa-events/data/catalog.json';
+    var START_YEAR = 2010;
     var letters = {а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'i',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'kh',ц:'ts',ч:'ch',ш:'sh',щ:'shch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya'};
     var aliases = {'макгрегор':'mcgregor','конор':'conor','хабиб':'khabib','махачев':'makhachev','оливейра':'oliveira','джонс':'jones','джон':'jon','порье':'poirier','холлоуэй':'holloway','холлоуей':'holloway','гейджи':'gaethje','гэтжи':'gaethje','адесанья':'adesanya','волкановски':'volkanovski','прохазка':'prochazka','чимаев':'chimaev','шевченко':'shevchenko','нганну':'ngannou','двалишвили':'dvalishvili','пимблетт':'pimblett','мухаммад':'muhammad','нурмагомедов':'nurmagomedov','юфс':'ufc'};
     var seriesNames = {'numbered':'Номерные','fight-night':'Fight Night','broadcast':'Телевизионные','finale':'Финалы TUF','special':'Специальные'};
@@ -31,7 +32,12 @@
         var n = e.title.match(/^(\S+)\s+(\d+(?:\.\d+)?)\b/);
         return n ? n[1]+' '+n[2] : e.title.replace(/\s+/g,' ').trim();
     }
-    if (typeof module !== 'undefined' && module.exports) module.exports = {normalize:normalize,valid:valid,matches:matches,eventQuery:eventQuery};
+    function scopeCatalog(data){
+        if(!valid(data))return null;
+        var copy={schemaVersion:data.schemaVersion,startYear:START_YEAR,updatedAt:data.updatedAt,featured:data.featured.slice(),events:data.events.filter(function(e){return Number(e.date.slice(0,4))>=START_YEAR;})};
+        return valid(copy)?copy:null;
+    }
+    if (typeof module !== 'undefined' && module.exports) module.exports = {normalize:normalize,valid:valid,matches:matches,eventQuery:eventQuery,scopeCatalog:scopeCatalog};
     if (typeof window === 'undefined') return;
     if (window.events_catalog_loaded || window.events_catalog_loading) return;
     window.events_catalog_loading = true;
@@ -47,7 +53,8 @@
         object.events_state=state;
         var root=$('<div class="events-catalog"></div>'),scroll=new L.Scroll({mask:true,over:true}),net=new L.Reguest();
         var catalog=memory || read('events_catalog_v1',null),favorites=read('events_watchlist_v1',[]);
-        if(!valid(catalog)) catalog=null;
+        catalog=scopeCatalog(catalog);
+        ['from','to'].forEach(function(key){if(state.filters[key]&&state.filters[key]<START_YEAR)state.filters[key]=START_YEAR;});
         if(!Array.isArray(favorites)) favorites=[];
         var active=false,dead=false,started=false,modal=false,dirty=false,ticket=0,last=null,observer,statusText='',positions={},imageEpoch=0;
         root.append(scroll.render());if(scroll.minus) scroll.minus();
@@ -91,7 +98,7 @@
                 var options=[{title:'Все',value:''}];
                 if(item.field==='from'||item.field==='to'){
                     var max=new Date().getFullYear()+1;if(catalog)catalog.events.forEach(function(e){max=Math.max(max,Number(e.date.slice(0,4)));});
-                    for(var y=max;y>=1993;y--)options.push({title:String(y),value:y});
+                    for(var y=max;y>=START_YEAR;y--)options.push({title:String(y),value:y});
                 }else if(item.field==='month'){
                     'Январь Февраль Март Апрель Май Июнь Июль Август Сентябрь Октябрь Ноябрь Декабрь'.split(' ').forEach(function(m,i){options.push({title:m,value:i+1});});
                 }else if(item.field==='series')Object.keys(seriesNames).forEach(function(s){options.push({title:seriesNames[s],value:s});});
@@ -159,7 +166,7 @@
             }else{
                 var filtered=events.filter(function(e){return matches(e,state.view==='search'?state.term:'',state.filters);}),f=state.filters;
                 var summary='Найдено: '+filtered.length;
-                if(f.from||f.to)summary+=' · Годы: '+(f.from||1993)+'–'+(f.to||'…');if(f.month)summary+=' · Месяц: '+f.month;if(f.series)summary+=' · '+seriesNames[f.series];
+                if(f.from||f.to)summary+=' · Годы: '+(f.from||START_YEAR)+'–'+(f.to||'…');if(f.month)summary+=' · Месяц: '+f.month;if(f.series)summary+=' · '+seriesNames[f.series];
                 if(f.status)summary+=' · '+({completed:'Прошедшие',upcoming:'Предстоящие',cancelled:'Отменённые'}[f.status]);
                 scroll.append($('<div class="events-results"></div>').text(summary));
                 if(!filtered.length)scroll.append($('<div class="events-empty"></div>').text('События не найдены. Измените запрос или сбросьте фильтры.'));
@@ -172,7 +179,7 @@
         function load(force){
             var id=++ticket;net.clear();statusText=catalog?'Проверка обновлений…':'Загрузка каталога…';draw();net.timeout(20000);
             net.native(DATA_URL+'?t='+(force?Date.now():Math.floor(Date.now()/300000)),function(data){
-                if(dead||id!==ticket)return;if(!valid(data)){failure();return;}
+                if(dead||id!==ticket)return;data=scopeCatalog(data);if(!data){failure();return;}
                 if(catalog&&data.updatedAt<catalog.updatedAt){statusText='Сохранён более свежий каталог';draw();return;}
                 catalog=memory=data;statusText=save('events_catalog_v1',data)?'':'Каталог загружен; кеш устройства недоступен';
                 if(!active)dirty=true;else draw();

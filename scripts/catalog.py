@@ -17,7 +17,15 @@ from bs4 import BeautifulSoup
 ROOT = Path(__file__).resolve().parents[1]
 ARCHIVE = 'https://www.sherdog.com/organizations/Ultimate-Fighting-Championship-UFC-2'
 REFERENCE = 'https://en.wikipedia.org/wiki/List_of_UFC_events'
-FEATURED = [100, 116, 139, 189, 205, 217, 236, 261, 300]
+START_YEAR = 2010
+START_DATE = f'{START_YEAR}-01-01'
+FEATURED = [116, 139, 189, 205, 217, 236, 261, 300]
+
+
+def scoped_page(rows, next_url):
+    """Archive pages are newest first; stop after the page crossing our boundary."""
+    return ([event for event in rows if event['date'] >= START_DATE],
+            None if any(event['date'] < START_DATE for event in rows) else next_url)
 
 
 def text(value):
@@ -187,16 +195,18 @@ def validate(catalog, previous=None):
         if set(e) - allowed or e['id'] in ids or not e['title'] or e['series'] in ('unknown', 'excluded'):
             raise ValueError('Invalid or duplicate event: ' + e.get('id', '?'))
         datetime.strptime(e['date'], '%Y-%m-%d')
+        if e['date'] < START_DATE:
+            raise ValueError('Event precedes catalog start year: ' + e['id'])
         if e['date'] < today and e['status'] != 'cancelled' and len(e['participants']) < 2:
             raise ValueError('Missing participants: ' + e['id'])
         if any(not u.startswith('https://') for u in e['images']):
             raise ValueError('Unsafe artwork URL')
         ids.add(e['id'])
         years[e['date'][:4]] += 1
-    missing = [str(y) for y in range(1993, int(today[:4]) + 1) if not years[str(y)]]
+    missing = [str(y) for y in range(START_YEAR, int(today[:4]) + 1) if not years[str(y)]]
     if missing:
         raise ValueError('Missing archive years: ' + ','.join(missing))
-    if previous and set(e['id'] for e in previous['events']) - ids:
+    if previous and set(e['id'] for e in previous['events'] if e['date'] >= START_DATE) - ids:
         raise ValueError('Previously published events disappeared')
     return dict(sorted(years.items()))
 
@@ -261,18 +271,19 @@ def main():
             raise ValueError('Pagination loop')
         pages.add(url)
         rows, url = parse_archive(fetch.get(url, 3600), url)
+        rows, url = scoped_page(rows, url)
         for e in rows:
             if e['id'] in reviews.get('series', {}):
                 e['series'] = reviews['series'][e['id']]['series']
             events[e['id']] = e
     rows = list(events.values())
     unknown = [e for e in rows if e['series'] == 'unknown']
-    reference = parse_reference(fetch.get(REFERENCE, 3600))
+    reference = [e for e in parse_reference(fetch.get(REFERENCE, 3600)) if e['date'] >= START_DATE]
     audit = reconcile(rows, reference, reviews)
     for event in rows:
         if event['id'] in audit['cancelledIds']:
             event['status'] = 'cancelled'
-    audit.update(pages=len(pages), total=len(rows), unknown=unknown,
+    audit.update(startYear=START_YEAR, pages=len(pages), total=len(rows), unknown=unknown,
                  counts=dict(Counter(e['series'] for e in rows)))
     write_json(Path('.cache/audit.json'), audit)
     print(json.dumps({k: len(v) if isinstance(v, list) else v for k, v in audit.items()}), flush=True)
@@ -283,7 +294,7 @@ def main():
     today = datetime.now(timezone.utc).date()
     previous = json.loads(Path(args.previous).read_text(encoding='utf8')) if args.previous and Path(args.previous).exists() else None
     result = []
-    additions = reviews.get('additions', [])
+    additions = [e for e in reviews.get('additions', []) if e['date'] >= START_DATE]
     state_path = Path(args.state)
     detail_state = json.loads(state_path.read_text(encoding='utf8')) if state_path.exists() else {}
     selected = sorted((e for e in rows if e['series'] != 'excluded'), key=lambda e: e['date'], reverse=True)
@@ -313,7 +324,7 @@ def main():
         else:
             raise ValueError('Ambiguous supplementary event identity')
     result.sort(key=lambda e: (e['date'], e['id']), reverse=True)
-    catalog = {'schemaVersion': 1, 'updatedAt': datetime.now(timezone.utc).isoformat(),
+    catalog = {'schemaVersion': 1, 'startYear': START_YEAR, 'updatedAt': datetime.now(timezone.utc).isoformat(),
                'events': result, 'featured': [e['id'] for e in result if number(e['title']) in FEATURED],
                'coverage': {}, 'sources': [ARCHIVE, REFERENCE]}
     catalog['coverage'] = validate(catalog, previous)
