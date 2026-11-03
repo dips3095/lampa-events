@@ -1,10 +1,17 @@
-name: Publish plugin
+name: Publish plugin and catalog
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '0 3 * * *'
   workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: Refresh all historical event details
+        type: boolean
+        default: false
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 concurrency:
@@ -13,22 +20,84 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --check events.js
-      - uses: actions/configure-pages@v5
+      - uses: pnpm/action-setup@v4
         with:
-          enablement: true
-      - name: Prepare public files
+          version: '11.25.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pip install -r requirements.txt
+      - name: Test parsers and TV interface
         run: |
-          mkdir _site
-          cp events.js index.html _site/
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          pnpm test
+      - name: Restore last good data branch
+        run: |
+          if git ls-remote --exit-code --heads origin catalog-data; then
+            git fetch origin catalog-data
+            git worktree add --detach .data-work FETCH_HEAD
+          else
+            git worktree add --detach .data-work HEAD
+            git -C .data-work switch --orphan catalog-data
+          fi
+      - uses: actions/cache/restore@v4
+        id: source-cache
+        with:
+          path: .cache/source
+          key: source-pages-${{ github.run_id }}
+          restore-keys: source-pages-
+      - name: Build and reconcile complete catalog
+        env:
+          FULL_REFRESH: ${{ inputs.full_refresh }}
+        run: |
+          args=()
+          if [ "$FULL_REFRESH" = 'true' ]; then args+=(--full); fi
+          python scripts/catalog.py --previous .data-work/catalog.json --state .data-work/details.json "${args[@]}"
+          python scripts/artwork.py _site/data/catalog.json --state .data-work/artwork.json
+          python scripts/check_release.py _site/data/catalog.json
+      - name: Save resumable source cache
+        if: always() && steps.source-cache.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/source
+          key: source-pages-${{ github.run_id }}
+      - name: Save diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: |
+            .cache/audit.json
+            test-results/
+          retention-days: 14
+      - name: Save validated snapshot
+        run: |
+          cp _site/data/catalog.json .data-work/catalog.json
+          cp .cache/audit.json .data-work/audit.json
+          git -C .data-work config user.name 'github-actions[bot]'
+          git -C .data-work config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C .data-work add catalog.json details.json artwork.json audit.json
+          if ! git -C .data-work diff --cached --quiet; then
+            git -C .data-work commit -m 'Update validated event catalog'
+            git -C .data-work push origin HEAD:catalog-data
+          fi
+      - uses: actions/configure-pages@v5
+      - name: Prepare public files
+        run: cp events.js index.html _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

@@ -1,99 +1,126 @@
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
-const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../events.js'), 'utf8');
-// Lampa's extension checker recognizes scripts by this literal API prefix.
-assert.match(source, /Lampa\./, 'Lampa must recognize this file as an extension');
-(async () => {
- const browser = await chromium.launch({executablePath: process.env.CHROMIUM_PATH, args: ['--no-sandbox']});
+const fs = require('node:fs');
+const path = require('node:path');
+const helpers = require('../events.js');
+const source = fs.readFileSync(path.join(__dirname, '../events.js'), 'utf8');
+assert.match(source, /Lampa\./);
+const fixture = {
+ schemaVersion:1, updatedAt:'2026-11-03T10:00:00Z', featured:['event-5','event-9'],
+ events:Array.from({length:85},(_,i)=>({
+  id:'event-'+i,title:'EVENT '+(100+i)+' — Alpha vs Beta',date:'2026-'+String(1+Math.floor(i/28)).padStart(2,'0')+'-'+String(1+i%28).padStart(2,'0'),
+  series:i%2?'numbered':'fight-night',status:i>=80?'upcoming':'completed',
+  participants:i===79?['Islam Makhachev','José Aldo']:['Other Fighter','Another Fighter'],
+  images:i===79?['https://images.test/broken.jpg','https://images.test/poster.svg']:[]
+ }))
+};
+assert.ok(helpers.valid(fixture));
+assert.ok(helpers.matches(fixture.events[79],'махачёв',{}));
+assert.ok(helpers.matches(fixture.events[79],'Jose',{}));
+assert.ok(!helpers.matches(fixture.events[0],'10',{}));
+assert.ok(!helpers.matches(fixture.events[79],'',{from:2027}));
+assert.ok(!helpers.valid({...fixture,events:[fixture.events[0],fixture.events[0]]}));
+
+(async()=>{
+ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,headless:true});
  try {
- const page = await browser.newPage();
+ const page=await browser.newPage({viewport:{width:1280,height:720}});
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('https://images.test/**',route=>route.request().url().includes('broken')?route.fulfill({status:404,body:''}):route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#345678"/></svg>'}));
  await page.setContent('<div class="menu"><ul class="menu__list"></ul></div><main></main>');
- await page.addScriptTag({path: process.env.JQUERY_PATH || require.resolve('jquery/dist/jquery.js')});
- await page.evaluate(() => {
-  window.appready = true;window.controllerName='content';window.focusCalls=0;
-  window.fixture = {events: [
-   {idEvent:'1', idLeague:'4443',strEvent:'EVENT 311 Main Event',dateEvent:'2025-01-19',strDescriptionEN:'SPOILER'},
-   {idEvent:'2', idLeague:'4443',strEvent:'EVENT Evening 249',dateEvent:'2025-01-11'},
-   {idEvent:'1', idLeague:'4443',strEvent:'EVENT 311',dateEvent:'2025-01-19'},
-   {idEvent:'bad',idLeague:'4443',strEvent:123,dateEvent:'2025-01-20'},
-   {idEvent:'3', idLeague:'9999',strEvent:'Other sport',dateEvent:'2025-01-20'}]};
-  window.Lampa = {
+ await page.addScriptTag({path:require.resolve('jquery/dist/jquery.js')});
+ await page.evaluate(data=>{
+  window.fixture=data;window.appready=true;window.controllerName='content';window.focusCalls=0;window.stored={};window.pending=[];
+  window.Lampa={
    Component:{add:(name,ctor)=>{window.Catalog=ctor;}},
-   Activity:{push:data=>{window.pushed=data;},backward:()=>{}},
-   Controller:{add:(name,c)=>{window.controller=c;},enabled:()=>({name:window.controllerName}),toggle:()=>{window.controllerName='content';window.controller.toggle();},
-    collectionSet:()=>{},collectionFocus:(node)=>{window.focusCalls++;$(node).trigger('hover:focus');}},
-   Select:{show:options=>{window.selection=options;}},
-   Scroll:function(){const wrap=$('<div class="scroll scroll--over"><div class="scroll__content"><div class="scroll__body"></div></div></div>');const body=wrap.find('.scroll__body');this.render=()=>wrap;this.body=()=>body;this.append=e=>body.append(e);this.update=()=>{};this.destroy=()=>wrap.remove();},
-   Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok,fail)=>{window.requestURL=url;setTimeout(()=>window.failRequest || (window.failSchedule && url.indexOf('espn.com') >= 0) ? fail() : ok(url.indexOf('/eventsday.php') >= 0 ? (window.artFixture || {events:[]}) : url.indexOf('/leagues/dropdown') >= 0 ? {leagues:[{id:'3321',slug:'event'}]} : url.indexOf('/scoreboard') >= 0 ? {events:window.scheduleFixture || (window.fixture.events || []).filter(e=>e.idLeague==='4443').map(e=>({id:e.idEvent,name:e.strEvent,date:e.dateEvent+'T21:00Z'}))} : window.fixture),0);};}
+   Activity:{push:data=>{window.pushed=data;window.catalog.stop();},backward:()=>{window.wentBack=true;}},
+   Storage:{get:(key,def)=>window.stored[key]??def,set:(key,value)=>{if(window.quotaFail)throw new Error('quota');window.stored[key]=value;}},
+   Input:{edit:(options,callback)=>{window.inputOptions=options;window.inputCallback=callback;window.controllerName='keyboard';}},
+   Select:{show:options=>{window.selection=options;window.controllerName='select';}},
+   Controller:{add:(name,c)=>{window.controller=c;},enabled:()=>({name:window.controllerName}),
+    toggle:name=>{window.controllerName=name;if(name==='content')window.controller.toggle();},collectionSet:()=>{},
+    collectionFocus:node=>{if(!node)throw new Error('Empty focus target');window.focusCalls++;$('.focus').removeClass('focus');$(node).addClass('focus').trigger('hover:focus');}},
+   Noty:{show:message=>{window.notice=message;}},
+   Scroll:function(){const wrap=$('<div class="scroll"><div class="scroll__content"><div class="scroll__body"></div></div></div>');const body=wrap.find('.scroll__body');this.render=()=>wrap;this.body=()=>body;this.append=e=>body.append(e);this.update=e=>{window.lastScrolled=$(e).attr('data-key');};this.destroy=()=>wrap.remove();},
+   Reguest:function(){this.timeout=()=>{};this.clear=()=>{};this.native=(url,ok,fail)=>{window.lastURL=url;const run=()=>window.failRequest?fail():ok(window.fixture);if(window.holdRequest)window.pending.push(run);else setTimeout(run,5);};}
   };
- });
- await page.evaluate(()=>{window.savedLampa=window.Lampa;delete window.Lampa;setTimeout(()=>{window.Lampa=window.savedLampa;},100);});
- await page.addScriptTag({path: require('node:path').join(__dirname, '../events.js')});
- await page.waitForFunction(()=>typeof window.Catalog==='function');
- await page.evaluate(()=>{window.catalog=new window.Catalog({events_year:2025});$('main').append(catalog.create());catalog.start();});
- await page.waitForSelector('.events-card');
- assert.equal(await page.locator('.events-card').count(),2);
- assert.match(await page.locator('.events-title').first().innerText(),/^EVENT 311/);
- assert.equal((await page.locator('main').innerText()).includes('SPOILER'),false);
- await page.evaluate(()=>{$('.events-card').first().trigger('hover:enter');selection.onSelect(selection.items[0]);});
- const pushed=await page.evaluate(()=>window.pushed);
- assert.equal(pushed.search,'EVENT 311'); assert.equal(pushed.component,'torrents'); assert.equal(pushed.from_search,true);
- await page.evaluate(()=>{$('.events-card').last().trigger('hover:enter');selection.onSelect(selection.items[1]);});
- assert.equal(await page.evaluate(()=>pushed.search),'EVENT 2025.01.11');
- await page.evaluate(()=>{$('.events-card').first().trigger('hover:focus');controller.right();});
- // A completed network request must not steal focus from a modal.
- await page.evaluate(()=>{window.controllerName='select';window.beforeFocus=window.focusCalls;$('.events-toolbar .selector').last().trigger('hover:enter');});
- await page.waitForFunction(()=>$('.events-card').length===2);
- assert.equal(await page.evaluate(()=>window.focusCalls),await page.evaluate(()=>window.beforeFocus));
- await page.evaluate(()=>{window.controllerName='content';});
- // Switch to a fresh year and exercise the failure/retry state.
- await page.evaluate(()=>{window.failRequest=true;$('.events-toolbar .selector').first().trigger('hover:enter');selection.onSelect({year:2024});});
- await page.waitForFunction(()=>$('.events-status').text().includes('Не удалось'));
- await page.evaluate(()=>{window.failRequest=false;window.fixture={events:null};$('.events-toolbar .selector').last().trigger('hover:enter');});
- await page.waitForFunction(()=>$('.events-status').text().includes('не найдены'));
- // A complete source must retain events after the first fifteen and after May.
- await page.evaluate(()=>{
-  window.scheduleFixture=Array.from({length:20},(_,i)=>({id:String(i+100),name:'EVENT '+(i+100),date:'2026-'+(i<10?'06':'10')+'-'+String(i%10+1).padStart(2,'0')+'T21:00Z'}));
-  $('.events-toolbar .selector').last().trigger('hover:enter');
- });
- await page.waitForFunction(()=>$('.events-card').length===20);
- assert.match(await page.locator('.events-date').first().innerText(),/^2026-10/);
- // Match Lampa's scroll wrapper and check safe margins at TV resolutions.
- await page.addStyleTag({content:'.menu{display:none}html,body{margin:0;background:#111b2b;color:#fff;font-family:Arial}main{height:calc(100vh - 100px);margin-top:100px}.scroll{display:flex;overflow:hidden}.scroll__content{width:100%;padding:2.5em 0}.scroll__body{position:relative}'});
- for (const [width,height,font] of [[1280,720,16],[1920,1080,24],[3840,2160,48]]) {
-  await page.setViewportSize({width,height});
-  await page.evaluate(font=>{document.body.style.fontSize=font+'px';$('.events-toolbar .selector').first().addClass('focus');},font);
-  const geometry=await page.evaluate(()=>{
-   const root=document.querySelector('.events-catalog').getBoundingClientRect();
-   const toolbar=document.querySelector('.events-toolbar').getBoundingClientRect();
-   const status=document.querySelector('.events-status').getBoundingClientRect();
-   const cards=Array.from(document.querySelectorAll('.events-card')).slice(0,5).map(e=>e.getBoundingClientRect().toJSON());
-   const poster=document.querySelector('.events-poster').getBoundingClientRect();
-   return {root:root.toJSON(),toolbar:toolbar.toJSON(),status:status.toJSON(),cards,ratio:poster.height/poster.width,overflow:document.documentElement.scrollWidth>innerWidth};
-  });
-  assert.ok(geometry.toolbar.left-geometry.root.left >= font,'Toolbar needs a safe left margin');
-  assert.ok(geometry.status.left-geometry.root.left >= font,'Status needs a safe left margin');
-  assert.equal(geometry.overflow,false,'No horizontal overflow');
-  assert.ok(Math.abs(geometry.ratio-1.5)<0.02,'Posters retain 2:3 ratio');
-  assert.ok(geometry.cards.every(c=>c.right<geometry.root.right && Math.abs(c.top-geometry.cards[0].top)<1),'Five cards fit in the row');
+  window.enter=key=>{const el=$('[data-key="'+key+'"]');Lampa.Controller.collectionFocus(el[0]);el.trigger('hover:enter');};
+  window.pick=value=>{const s=window.selection;s.onSelect(s.items.find(x=>x.action===value||x.field===value||x.value===value));};
+ },fixture);
+ // Delayed host startup, then repeated script load must install only once.
+ await page.evaluate(()=>{window.savedLampa=window.Lampa;delete window.Lampa;setTimeout(()=>window.Lampa=window.savedLampa,30);});
+ await page.addScriptTag({content:source});
+ await page.waitForFunction(()=>window.Catalog);
+ await page.addScriptTag({content:source});
+ assert.equal(await page.locator('.menu__item').count(),1);
+ await page.evaluate(()=>{window.activity={};window.catalog=new Catalog(activity);$('main').append(catalog.create());catalog.start();});
+ await page.waitForFunction(()=>$('.events-status').text().includes('Обновлено'));
+ assert.deepEqual(await page.locator('h2').allTextContents(),['Последние турниры','Скоро','Лучшие турниры']);
+ assert.equal(await page.locator('[data-group="recent"] .events-card').count(),12);
+ assert.equal(await page.locator('[data-group="soon"] .events-card').count(),5);
+ assert.equal(await page.locator('.events-toolbar').innerText().then(t=>t.includes('Год')),false);
+ await page.waitForSelector('.events-poster.has-artwork');
+ assert.equal(await page.locator('.has-artwork img').first().getAttribute('src'),'https://images.test/poster.svg');
+ // Designed covers render even without any original artwork.
+ assert.equal(await page.locator('.events-cover strong').first().innerText(),fixture.events[79].title);
+ // Navigation: toolbar -> rail, horizontal scroll, next rail, restore saved column.
+ await page.evaluate(()=>{controller.down();for(let i=0;i<8;i++)controller.right();window.railKey=activity.events_state.key;controller.down();controller.up();});
+ assert.equal(await page.evaluate(()=>activity.events_state.key),await page.evaluate(()=>window.railKey));
+ assert.ok(await page.evaluate(()=>document.querySelector('[data-group="recent"]').scrollLeft>0));
+ // Favorites persist and create a new shelf.
+ await page.evaluate(()=>{enter('recent:event-79');pick('save');});
+ await page.waitForSelector('[data-group="saved"] .events-card');
+ assert.deepEqual(await page.evaluate(()=>stored.events_watchlist_v1),['event-79']);
+ // Whole archive, pagination and combined filters.
+ await page.evaluate(()=>enter('all'));
+ assert.equal(await page.locator('.events-card').count(),40);
+ await page.evaluate(()=>enter('more'));
+ assert.equal(await page.locator('.events-card').count(),80);
+ await page.evaluate(()=>enter('more'));
+ assert.equal(await page.locator('.events-card').count(),85);
+ await page.evaluate(()=>{enter('filters');pick('series');pick('numbered');});
+ assert.equal(await page.locator('.events-card').count(),40);
+ assert.match(await page.locator('.events-results').innerText(),/Найдено: 42/);
+ await page.evaluate(()=>{enter('filters');pick('reset');enter('search');inputCallback('махачев');});
+ assert.equal(await page.locator('.events-card').count(),1);
+ assert.equal(await page.locator('.events-title').innerText(),fixture.events[79].title);
+ await page.evaluate(()=>{enter('catalog:event-79');pick('title');});
+ assert.equal(await page.evaluate(()=>pushed.search),'EVENT 179');
+ assert.equal(await page.evaluate(()=>pushed.from_search),true);
+ await page.evaluate(()=>catalog.start());
+ assert.equal(await page.evaluate(()=>activity.events_state.key),'catalog:event-79');
+ await page.evaluate(()=>{enter('search');inputCallback('произвольный запрос');enter('direct');});
+ assert.equal(await page.evaluate(()=>pushed.search),'произвольный запрос');
+ assert.equal(await page.evaluate(()=>pushed.component),'torrents');
+ await page.evaluate(()=>catalog.start());
+ assert.equal(await page.locator('.events-card').count(),0);
+ // Delayed refresh cannot steal modal focus or rebuild underneath it.
+ await page.evaluate(()=>{window.holdRequest=true;enter('refresh');enter('search');window.beforeFocus=focusCalls;window.pending.shift()();});
+ assert.equal(await page.evaluate(()=>focusCalls),await page.evaluate(()=>beforeFocus));
+ assert.equal(await page.evaluate(()=>controllerName),'keyboard');
+ await page.evaluate(()=>{inputCallback('');window.holdRequest=false;window.failRequest=true;enter('refresh');});
+ await page.waitForFunction(()=>$('.events-status').text().includes('сохранённый'));
+ assert.ok(await page.locator('.events-card').count()>0);
+ // Corrupt response also preserves last good catalog.
+ await page.evaluate(()=>{window.failRequest=false;window.fixture={bad:true};enter('refresh');});
+ await page.waitForFunction(()=>$('.events-status').text().includes('сохранённый'));
+ await page.evaluate(data=>{window.fixture=data;enter('home');},fixture);
+ // Realistic TV typography and layout; wide shelves must not overflow the page.
+ await page.addStyleTag({content:'html,body{margin:0;background:#10141d;color:#fff;font-family:Arial}.menu{display:none}main{height:calc(100vh - 90px);margin-top:90px}.scroll{overflow:hidden}.scroll__content{width:100%}'});
+ fs.mkdirSync('test-results',{recursive:true});
+ for(const [width,height,font] of [[1280,720,16],[1920,1080,24],[3840,2160,48]]){
+  await page.setViewportSize({width,height});await page.evaluate(font=>{document.body.style.fontSize=font+'px';},font);
+  const geometry=await page.evaluate(()=>{const root=document.querySelector('.events-catalog').getBoundingClientRect(),p=document.querySelector('.events-poster').getBoundingClientRect();return {ratio:p.height/p.width,overflow:document.documentElement.scrollWidth>innerWidth,margin:document.querySelector('.events-toolbar').getBoundingClientRect().left-root.left};});
+  assert.ok(Math.abs(geometry.ratio-1.5)<.02);assert.equal(geometry.overflow,false);assert.ok(geometry.margin>=font);
+  await page.screenshot({path:'test-results/home-'+width+'.png'});
  }
- if(process.env.LAYOUT_SCREENSHOT) await page.screenshot({path:process.env.LAYOUT_SCREENSHOT});
- // A fallback response must never masquerade as a complete cached season.
- await page.evaluate(()=>{window.failSchedule=true;window.fixture={events:[{idEvent:'backup',idLeague:'4443',strEvent:'EVENT 1',dateEvent:'2026-01-01'}]};$('.events-toolbar .selector').last().trigger('hover:enter');});
- await page.waitForFunction(()=>$('.events-status').text().includes('неполным'));
- await page.evaluate(()=>{window.failSchedule=false;$('.events-toolbar .selector').last().trigger('hover:enter');});
- await page.waitForFunction(()=>$('.events-card').length===20);
- // Artwork outside the first fifteen events is fetched independently by date.
- await page.route('https://artwork.test/**',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="30"><rect width="20" height="30" fill="blue"/></svg>'}));
- await page.evaluate(()=>{
-  window.artFixture={events:[{idEvent:'art',idLeague:'4443',strEvent:'EVENT 119',dateEvent:'2026-10-10',strPoster:'https://artwork.test/poster.svg'}]};
-  $('.events-toolbar .selector').last().trigger('hover:enter');
- });
- await page.waitForSelector('.events-card:first-child .events-poster img');
- await page.waitForFunction(()=>document.querySelector('.events-poster img').naturalWidth>0);
- assert.equal(await page.locator('.events-poster img').first().getAttribute('src'),'https://artwork.test/poster.svg');
+ // Legacy lazy-load fallback and persistent cache survive reopening with no network.
+ await page.evaluate(()=>{catalog.destroy();window.IntersectionObserver=undefined;window.failRequest=true;window.catalog=new Catalog({});$('main').append(catalog.create());catalog.start();});
+ await page.waitForFunction(()=>$('.events-status').text().includes('сохранённый'));
+ assert.ok(await page.locator('.events-card').count()>0);
  await page.evaluate(()=>catalog.destroy());
  assert.equal(await page.locator('.events-catalog').count(),0);
- console.log('PASS: startup, cards, sorting, deduplication, spoiler omission, search handoff, date search, navigation, error, retry, empty response, cleanup.');
- } finally { await browser.close(); }
+ assert.deepEqual(errors,[]);
+ console.log('PASS: archive, search, filters, favorites, artwork fallback, focus, pagination, cache, legacy mode, 720p/1080p/4K.');
+ }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

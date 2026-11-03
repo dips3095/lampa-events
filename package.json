@@ -1,0 +1,7 @@
+{
+  "name": "lampa-events",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {"test": "node --check events.js && node tests/smoke.cjs"},
+  "devDependencies": {"jquery": "3.7.1", "playwright": "1.56.1"}
+}

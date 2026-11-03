@@ -1,0 +1,22 @@
+{
+  "reviewedOn": "2026-11-03",
+  "series": {},
+  "matches": {
+    "ufc brazil ultimate brazil|1998-10-16": {"id":"sd-27","reason":"Same date and event; Sherdog uses historical 17.5 numbering."},
+    "ufc japan ultimate japan|1997-12-21": {"id":"sd-24","reason":"Same date and event; Sherdog uses historical 15.5 numbering."}
+  },
+  "referenceExceptions": {
+    "ufc fight night hermansson vs weidman|2020-05-02": "Canceled block in independent event table, never held on this date.",
+    "ufc fight night smith vs teixeira|2020-04-25": "Canceled block in independent event table; replacement on another date is a separate entry.",
+    "ufc fight night overeem vs harris|2020-04-11": "Canceled block in independent event table; replacement on another date is a separate entry.",
+    "ufc on espn ngannou vs rozenstruik|2020-03-28": "Canceled block in independent event table, never held on this date.",
+    "ufc fight night woodley vs edwards|2020-03-21": "Canceled block in independent event table, never held on this date.",
+    "ufc fight night 296|2027-01-16": "Upcoming event present in independent table but absent in primary archive; explicit addition below."
+  },
+  "sourceExceptions": {},
+  "additions": [{
+    "id":"ref-2027-01-16", "title":"UFC Fight Night 296", "date":"2027-01-16", "series":"fight-night",
+    "source":"https://en.wikipedia.org/wiki/UFC_Fight_Night_296", "status":"upcoming", "participants":[], "images":[],
+    "sources":["https://en.wikipedia.org/wiki/UFC_Fight_Night_296","https://en.wikipedia.org/wiki/List_of_UFC_events"]
+  }]
+}
