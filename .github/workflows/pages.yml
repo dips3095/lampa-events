@@ -67,6 +67,7 @@ jobs:
           args=()
           if [ "$FULL_REFRESH" = 'true' ]; then args+=(--full); fi
           python scripts/catalog.py --previous .data-work/catalog.json --state .data-work/details.json "${args[@]}"
+          python scripts/wiki_posters.py _site/data/catalog.json --state .data-work/wiki-posters.json
           python scripts/artwork.py _site/data/catalog.json --state .data-work/artwork.json
           python scripts/check_release.py _site/data/catalog.json
       - name: Save resumable source cache
@@ -90,7 +91,7 @@ jobs:
           cp .cache/audit.json .data-work/audit.json
           git -C .data-work config user.name 'github-actions[bot]'
           git -C .data-work config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C .data-work add catalog.json details.json artwork.json audit.json
+          git -C .data-work add catalog.json details.json artwork.json wiki-posters.json audit.json
           if ! git -C .data-work diff --cached --quiet; then
             git -C .data-work commit -m 'Update validated event catalog'
             git -C .data-work push origin HEAD:catalog-data

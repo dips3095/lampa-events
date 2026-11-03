@@ -155,6 +155,7 @@ def reconcile(events, reference, reviews):
     used = set()
     unmatched = []
     cancelled_ids = []
+    reference_pages = {}
     for ref in reference:
         candidates = [e for e in included if abs((datetime.fromisoformat(e['date']) - datetime.fromisoformat(ref['date'])).days) <= 1]
         n = number(ref['title'])
@@ -174,12 +175,14 @@ def reconcile(events, reference, reviews):
             matches = [e for e in matches if e['date'] == ref['date']]
         if len(matches) == 1 and matches[0]['id'] not in used:
             used.add(matches[0]['id'])
+            if ref.get('source'):
+                reference_pages[matches[0]['id']] = ref['source']
             if ref.get('cancelled'):
                 cancelled_ids.append(matches[0]['id'])
         elif norm(ref['title']) + '|' + ref['date'] not in reviews.get('referenceExceptions', {}):
             unmatched.append(ref)
     source_only = [e for e in included if e['id'] not in used and e['id'] not in reviews.get('sourceExceptions', {})]
-    return {'referenceCount': len(reference), 'matchedCount': len(used), 'cancelledIds': cancelled_ids,
+    return {'referenceCount': len(reference), 'matchedCount': len(used), 'cancelledIds': cancelled_ids, 'referencePages': reference_pages,
             'unmatchedReference': unmatched, 'unmatchedSource': source_only}
 
 
@@ -286,7 +289,7 @@ def main():
     audit.update(startYear=START_YEAR, pages=len(pages), total=len(rows), unknown=unknown,
                  counts=dict(Counter(e['series'] for e in rows)))
     write_json(Path('.cache/audit.json'), audit)
-    print(json.dumps({k: len(v) if isinstance(v, list) else v for k, v in audit.items()}), flush=True)
+    print(json.dumps({k: len(v) if isinstance(v, list) or k == 'referencePages' else v for k, v in audit.items()}), flush=True)
     if args.audit_only:
         return
     if unknown or audit['unmatchedReference'] or audit['unmatchedSource']:
@@ -311,6 +314,8 @@ def main():
             value = parse_detail(fetch.get(e['source'], age), e, today.isoformat())
             detail_state[e['id']] = {'fetchedAt': fetch.fetched_at, 'event': value}
             write_json(state_path, detail_state)
+        value = dict(value)
+        value['sources'] = list(dict.fromkeys(value['sources'] + ([audit['referencePages'][e['id']]] if e['id'] in audit['referencePages'] else [])))
         result.append(value)
         if i % 20 == 0:
             print(f'Details {i + 1}/{len(selected)}', flush=True)

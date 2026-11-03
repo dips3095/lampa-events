@@ -41,6 +41,7 @@ assert.ok(!helpers.valid({...fixture,events:[fixture.events[0],fixture.events[0]
    Storage:{get:(key,def)=>window.stored[key]??def,set:(key,value)=>{if(window.quotaFail)throw new Error('quota');window.stored[key]=value;}},
    Input:{edit:(options,callback)=>{window.inputOptions=options;window.inputCallback=callback;window.controllerName='keyboard';}},
    Select:{show:options=>{window.selection=options;window.controllerName='select';}},
+   Modal:{open:options=>{window.modalOptions=options;window.modalNode=$('<div class="modal"></div>').append(options.html).appendTo('body');window.controllerName='modal';},close:()=>{if(window.modalNode)window.modalNode.remove();window.controllerName='content';}},
    Controller:{add:(name,c)=>{window.controller=c;},enabled:()=>({name:window.controllerName}),
     toggle:name=>{window.controllerName=name;if(name==='content')window.controller.toggle();},collectionSet:()=>{},
     collectionFocus:node=>{if(!node)throw new Error('Empty focus target');window.focusCalls++;$('.focus').removeClass('focus');$(node).addClass('focus').trigger('hover:focus');}},
@@ -59,16 +60,17 @@ assert.ok(!helpers.valid({...fixture,events:[fixture.events[0],fixture.events[0]
  assert.equal(await page.locator('.menu__item').count(),1);
  await page.evaluate(()=>{window.activity={};window.catalog=new Catalog(activity);$('main').append(catalog.create());catalog.start();});
  await page.waitForFunction(()=>$('.events-status').text().includes('Обновлено'));
- assert.deepEqual(await page.locator('h2').allTextContents(),['Последние турниры','Скоро','Лучшие турниры']);
+ assert.deepEqual(await page.locator('h2').allTextContents(),['Последние турниры','Скоро','Знаковые турниры']);
  assert.equal(await page.locator('[data-group="recent"] .events-card').count(),12);
  assert.equal(await page.locator('[data-group="soon"] .events-card').count(),5);
- assert.equal(await page.locator('.events-toolbar').innerText().then(t=>t.includes('Год')),false);
+ assert.equal(await page.locator('.events-toolbar').innerText().then(t=>t.includes('Год:')),false);
+ assert.match(await page.locator('[data-group="best"] .events-note').first().innerText(),/Авторская/);
  await page.waitForSelector('.events-poster.has-artwork');
  assert.equal(await page.locator('.has-artwork img').first().getAttribute('src'),'https://images.test/poster.svg');
  // Designed covers render even without any original artwork.
  assert.equal(await page.locator('.events-cover strong').first().innerText(),fixture.events[79].title);
  // Navigation: toolbar -> rail, horizontal scroll, next rail, restore saved column.
- await page.evaluate(()=>{controller.down();for(let i=0;i<8;i++)controller.right();window.railKey=activity.events_state.key;controller.down();controller.up();});
+ await page.evaluate(()=>{Lampa.Controller.collectionFocus($('[data-key="recent:event-79"]')[0]);for(let i=0;i<8;i++)controller.right();window.railKey=activity.events_state.key;controller.down();controller.up();});
  assert.equal(await page.evaluate(()=>activity.events_state.key),await page.evaluate(()=>window.railKey));
  assert.ok(await page.evaluate(()=>document.querySelector('[data-group="recent"]').scrollLeft>0));
  // Favorites persist and create a new shelf.
@@ -82,10 +84,21 @@ assert.ok(!helpers.valid({...fixture,events:[fixture.events[0],fixture.events[0]
  assert.equal(await page.locator('.events-card').count(),80);
  await page.evaluate(()=>enter('more'));
  assert.equal(await page.locator('.events-card').count(),85);
- await page.evaluate(()=>{enter('filters');pick('series');pick('numbered');});
+ await page.evaluate(()=>{enter('filters');$('[data-field="series"][data-value="numbered"]').trigger('hover:enter');modalOptions.buttons[0].onSelect();});
  assert.equal(await page.locator('.events-card').count(),40);
  assert.match(await page.locator('.events-results').innerText(),/Найдено: 42/);
- await page.evaluate(()=>{enter('filters');pick('reset');enter('search');inputCallback('махачев');});
+ // Draft filter edits are discarded on Cancel, and all choices share one panel.
+ await page.evaluate(()=>{enter('filters');$('[data-field="series"][data-value="fight-night"]').trigger('hover:enter');modalOptions.buttons[2].onSelect();});
+ assert.match(await page.locator('.events-results').innerText(),/Найдено: 42/);
+ await page.evaluate(()=>{enter('filters');modalOptions.buttons[1].onSelect();modalOptions.buttons[0].onSelect();enter('years');});
+ assert.equal(await page.locator('.events-years .is-active').innerText(),'2026');
+ assert.match(await page.locator('.events-results').innerText(),/2026 год/);
+ assert.equal(await page.locator('.events-card').count(),40);
+ await page.evaluate(()=>{enter('filters');});
+ assert.equal(await page.locator('.modal [data-field="year"]').count(),0);
+ assert.equal(await page.locator('.modal [data-field="month"]').count(),0);
+ await page.evaluate(()=>{modalOptions.buttons[2].onSelect();enter('search');inputCallback('махачев');});
+ await page.waitForFunction(()=>activity.events_state.term==='махачев');
  assert.equal(await page.locator('.events-card').count(),1);
  assert.equal(await page.locator('.events-title').innerText(),fixture.events[79].title);
  await page.evaluate(()=>{enter('catalog:event-79');pick('title');});
@@ -93,7 +106,9 @@ assert.ok(!helpers.valid({...fixture,events:[fixture.events[0],fixture.events[0]
  assert.equal(await page.evaluate(()=>pushed.from_search),true);
  await page.evaluate(()=>catalog.start());
  assert.equal(await page.evaluate(()=>activity.events_state.key),'catalog:event-79');
- await page.evaluate(()=>{enter('search');inputCallback('произвольный запрос');enter('direct');});
+ await page.evaluate(()=>{enter('search');inputCallback('произвольный запрос');});
+ await page.waitForFunction(()=>activity.events_state.term==='произвольный запрос');
+ await page.evaluate(()=>enter('direct'));
  assert.equal(await page.evaluate(()=>pushed.search),'произвольный запрос');
  assert.equal(await page.evaluate(()=>pushed.component),'torrents');
  await page.evaluate(()=>catalog.start());
@@ -102,7 +117,9 @@ assert.ok(!helpers.valid({...fixture,events:[fixture.events[0],fixture.events[0]
  await page.evaluate(()=>{window.holdRequest=true;enter('refresh');enter('search');window.beforeFocus=focusCalls;window.pending.shift()();});
  assert.equal(await page.evaluate(()=>focusCalls),await page.evaluate(()=>beforeFocus));
  assert.equal(await page.evaluate(()=>controllerName),'keyboard');
- await page.evaluate(()=>{inputCallback('');window.holdRequest=false;window.failRequest=true;enter('refresh');});
+ await page.evaluate(()=>{inputCallback('');window.holdRequest=false;window.failRequest=true;});
+ await page.waitForFunction(()=>activity.events_state.term==='');
+ await page.evaluate(()=>enter('refresh'));
  await page.waitForFunction(()=>$('.events-status').text().includes('сохранённый'));
  assert.ok(await page.locator('.events-card').count()>0);
  // Corrupt response also preserves last good catalog.
