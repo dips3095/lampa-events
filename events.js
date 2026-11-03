@@ -94,17 +94,27 @@
                 // The host calls the same callback on Enter and Back. Let its event finish first.
                 setTimeout(function(){if(dead||finished)return;finished=true;modal=false;if(!cancelled)callback(String(value||'').trim());resume();},0);
             });
-            if(!kb||!kb.listener)return;
-            kb.listener.follow('back',function(){cancelled=true;});
             var panel=$('.settings-input').last(),board=panel.find('.simple-keyboard');
+            var managed=kb&&kb.listener;
+            if(managed)kb.listener.follow('back',function(){cancelled=true;});
+            var inputController=L.Controller.enabled().controller;
+            if(inputController&&inputController.back){var originalBack=inputController.back;inputController.back=function(){cancelled=true;originalBack.call(inputController);};}
             var controls=board.find('.simple-keyboard-buttons');
             if(!controls.length){controls=$('<div class="simple-keyboard-buttons"><div class="simple-keyboard-buttons__enter">Готово</div><div class="simple-keyboard-buttons__cancel">Отмена</div></div>');board.append(controls);}
             controls.addClass('events-keyboard-controls');
             var done=controls.find('.simple-keyboard-buttons__enter').addClass('selector events-keyboard-action');
             var cancel=controls.find('.simple-keyboard-buttons__cancel').addClass('selector events-keyboard-action');
-            done.off('click').on('click hover:enter',function(e){e.preventDefault();panel.find('input,textarea').blur();kb.listener.send('enter');});
-            cancel.off('click').on('click hover:enter',function(e){e.preventDefault();cancelled=true;panel.find('input,textarea').blur();kb.listener.send('back');});
-            kb.listener.follow('down',function(){L.Controller.collectionSet(board);L.Controller.collectionFocus(done[0],board);});
+            if(managed){
+                done.off('click').on('click hover:enter',function(e){e.preventDefault();panel.find('input,textarea').blur();kb.listener.send('enter');});
+                cancel.off('click').on('click hover:enter',function(e){e.preventDefault();cancelled=true;panel.find('input,textarea').blur();kb.listener.send('back');});
+                kb.listener.follow('down',function(){L.Controller.collectionSet(board);L.Controller.collectionFocus(done[0],board);});
+            }else{
+                // Legacy Input.edit returns no widget. Preserve the host click handlers.
+                done.on('hover:enter',function(){panel.find('input,textarea').blur();if(board.find('input,textarea').length)done.trigger('click');else setTimeout(function(){if(!dead&&panel.closest('body').length)board.find('[data-skbtn="{ENTER}"],[data-skbtn="{SEARCH}"]').first().trigger('hover:enter');},120);});
+                cancel[0].addEventListener('click',function(){cancelled=true;},true);
+                cancel.on('hover:enter',function(){cancelled=true;panel.find('input,textarea').blur();L.Controller.back();});
+            }
+            panel.find('input,textarea').on('keyup.events',function(e){if(e.keyCode===40){$(this).blur();L.Controller.collectionSet(board);L.Controller.collectionFocus(done[0],board);}});
             var initial=board.find('.focus')[0]||board.find('input,textarea')[0]||board.find('.hg-button')[0];
             L.Controller.collectionSet(board);
             L.Controller.collectionFocus(initial||done[0],board);

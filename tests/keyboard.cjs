@@ -8,7 +8,8 @@ const sources={input:fixture('input.js'),keyboard:fixture('keyboard.js'),subscri
 (async()=>{
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,headless:true});
  try{
- for(const mode of ['simple','lampa']){
+ for(const mode of ['simple','lampa','legacy','legacy-lampa']){
+  console.log('Keyboard mode:',mode);
   const page=await browser.newPage({viewport:{width:1280,height:720}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setContent('<div class="menu"><ul class="menu__list"></ul></div><main></main>');
@@ -28,9 +29,9 @@ const sources={input:fixture('input.js'),keyboard:fixture('keyboard.js'),subscri
     return collection.filter(e=>e!==focused&&e.offsetWidth).map(e=>{const n=e.getBoundingClientRect(),dx=n.left+n.width/2-x,dy=n.top+n.height/2-y;return {e,dx,dy,score:Math.hypot(dx,dy)};}).filter(n=>direction==='right'?n.dx>5&&Math.abs(n.dy)<30:direction==='left'?n.dx< -5&&Math.abs(n.dy)<30:direction==='down'?n.dy>5:n.dy< -5).sort((a,b)=>a.score-b.score)[0]?.e;
    };
    window.Navigator={canmove:d=>!!next(d),move:d=>focus(next(d))};
-   const Controller={add:(n,c)=>controllers[n]=c,enabled:()=>({name:controllerName}),toggle:n=>{controllerName=n;controllers[n]?.toggle?.();},back:()=>controllers[controllerName]?.back?.(),collectionSet:root=>{collection=$(root).find('.selector').toArray();$('.focus').removeClass('focus');focused=null;},collectionFocus:(node,root)=>focus($(node)[0]||$(root).find('.selector')[0]),windowTop:()=>false};
-   const Storage={field:k=>k==='keyboard_type'?mode:false,get:(k,d)=>k==='language'?'en':stored[k]??d,set:(k,v)=>stored[k]=v};
-   const Platform={is:n=>n==='webos',screen:n=>n==='tv',desktop:()=>false,mouse:()=>mode==='simple'};
+   const Controller={add:(n,c)=>controllers[n]=c,enabled:()=>({name:controllerName,controller:controllers[controllerName]}),toggle:n=>{controllerName=n;controllers[n]?.toggle?.();},back:()=>controllers[controllerName]?.back?.(),collectionSet:root=>{collection=$(root).find('.selector').toArray();$('.focus').removeClass('focus');focused=null;},collectionFocus:(node,root)=>focus($(node)[0]||$(root).find('.selector')[0]),windowTop:()=>false};
+   const Storage={field:k=>k==='keyboard_type'?(mode.includes('lampa')?'lampa':'simple'):false,get:(k,d)=>k==='language'?'en':stored[k]??d,set:(k,v)=>stored[k]=v};
+   const Platform={is:n=>n==='webos',screen:n=>n==='tv',desktop:()=>false,mouse:()=>!mode.includes('lampa')};
    const Keypad={enable:()=>keypadEnabled=true,disable:()=>keypadEnabled=false};
    const Lang={translate:k=>({ready:'Готово',cancel:'Отмена',search_input:'Поиск'}[k]||k)};
    const Utils={uid:()=>String(Date.now()),isTouchDevice:()=>false,inputDisplay:v=>String(v).replace(/</g,'&lt;')};
@@ -38,7 +39,8 @@ const sources={input:fixture('input.js'),keyboard:fixture('keyboard.js'),subscri
    const Select={show:o=>{window.selection=o;}};
    const Noty={show:()=>{}};
    const Keyboard=module(sources.keyboard,['Controller','Subscribe','Noty','Platform','Android','Storage','Keypad','Lang','Layers','Arrays','Select','Utils'],[Controller,Subscribe,Noty,Platform,{},Storage,Keypad,Lang,Layers,Arrays,Select,Utils]);
-   const Input=module(sources.input,['Template','Keybord','Controller','Select','Storage','Arrays','Noty','Lang','Utils'],[{get:()=>$(template)},Keyboard,Controller,Select,Storage,Arrays,Noty,Lang,Utils]);
+   const hostInput=module(sources.input,['Template','Keybord','Controller','Select','Storage','Arrays','Noty','Lang','Utils'],[{get:()=>$(template)},Keyboard,Controller,Select,Storage,Arrays,Noty,Lang,Utils]);
+   const Input=mode.startsWith('legacy')?{edit:(p,cb)=>{hostInput.edit(p,cb);}}:hostInput;
    window.Lampa={Controller,Storage,Input,Select,Noty,Component:{add:(n,c)=>window.Catalog=c},Activity:{backward:()=>{},push:v=>window.pushed=v},
     Scroll:function(){const el=$('<div class="scroll"><div class="scroll__body"></div></div>');this.render=()=>el;this.body=()=>el.find('.scroll__body');this.append=e=>this.body().append(e);this.update=()=>{};this.destroy=()=>el.remove();},
     Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok)=>setTimeout(()=>ok({schemaVersion:1,updatedAt:'2026-11-04T00:00:00Z',featured:[],events:[{id:'one',title:'Event 1',date:'2026-01-01',series:'numbered',status:'completed',participants:['A','B'],images:[]}]}),0);}};
@@ -50,7 +52,7 @@ const sources={input:fixture('input.js'),keyboard:fixture('keyboard.js'),subscri
   await page.waitForFunction(()=>document.querySelector('.events-card'));
   await page.evaluate(()=>enter('search'));
   assert.equal(await page.locator('.simple-keyboard-buttons .selector').count(),2);
-  if(mode==='simple'){
+  if(!mode.includes('lampa')){
    await page.locator('.simple-keyboard-input').fill('свободный запрос');
    await page.waitForTimeout(1100); // Native keyboard deliberately ignores blur keys for its first second.
    await page.locator('.simple-keyboard-input').press('ArrowDown');
@@ -63,12 +65,12 @@ const sources={input:fixture('input.js'),keyboard:fixture('keyboard.js'),subscri
   await page.waitForFunction(()=>!document.querySelector('.settings-input'));
   await page.waitForFunction(()=>activity.events_state.term);
   const saved=await page.evaluate(()=>activity.events_state.term);
-  assert.equal(saved,mode==='simple'?'свободный запрос':'a');
+  assert.equal(saved,!mode.includes('lampa')?'свободный запрос':'a');
   await page.evaluate(()=>enter('direct'));
   assert.equal(await page.evaluate(()=>pushed.search),saved);
   // Cancel must be reachable by D-pad and preserve the old query.
   await page.evaluate(()=>{catalog.start();enter('search');});
-  if(mode==='simple')await page.locator('.simple-keyboard-input').fill('отменённый запрос');
+  if(!mode.includes('lampa'))await page.locator('.simple-keyboard-input').fill('отменённый запрос');
   await page.evaluate(()=>{document.activeElement.blur();Lampa.Controller.collectionSet($('.simple-keyboard'));Lampa.Controller.collectionFocus($('.simple-keyboard-buttons__enter')[0],$('.simple-keyboard'));});
   await page.keyboard.press('ArrowRight');
   assert.ok(await page.locator('.simple-keyboard-buttons__cancel').evaluate(e=>e.classList.contains('focus')));
