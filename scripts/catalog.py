@@ -260,14 +260,14 @@ def main():
         if url in pages or len(pages) > 30:
             raise ValueError('Pagination loop')
         pages.add(url)
-        rows, url = parse_archive(fetch.get(url), url)
+        rows, url = parse_archive(fetch.get(url, 3600), url)
         for e in rows:
             if e['id'] in reviews.get('series', {}):
                 e['series'] = reviews['series'][e['id']]['series']
             events[e['id']] = e
     rows = list(events.values())
     unknown = [e for e in rows if e['series'] == 'unknown']
-    reference = parse_reference(fetch.get(REFERENCE))
+    reference = parse_reference(fetch.get(REFERENCE, 3600))
     audit = reconcile(rows, reference, reviews)
     for event in rows:
         if event['id'] in audit['cancelledIds']:
@@ -289,7 +289,8 @@ def main():
     selected = sorted((e for e in rows if e['series'] != 'excluded'), key=lambda e: e['date'], reverse=True)
     for i, e in enumerate(selected):
         recent = e['date'] >= (today - timedelta(days=30)).isoformat()
-        age = 0 if args.full else (86400 if recent else 7 * 86400)
+        # Leave room for scheduler jitter: an early run must not defer refresh another day.
+        age = 0 if args.full else (23 * 3600 if recent else 6 * 86400)
         cached = detail_state.get(e['id'], {})
         if cached and time.time() - cached.get('fetchedAt', 0) < age and cached['event']['date'] == e['date'] and cached['event']['title'] == e['title']:
             value = dict(cached['event'])
