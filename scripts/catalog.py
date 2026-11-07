@@ -293,6 +293,11 @@ def main():
     if args.audit_only:
         return
     if unknown or audit['unmatchedReference'] or audit['unmatchedSource']:
+        for category, entries in (('Unknown series', unknown),
+                                  ('Only in reference', audit['unmatchedReference']),
+                                  ('Only in primary source', audit['unmatchedSource'])):
+            for entry in entries:
+                print(f'{category}: ' + json.dumps(entry, ensure_ascii=False), flush=True)
         raise ValueError('Archive reconciliation requires review; see .cache/audit.json')
     today = datetime.now(timezone.utc).date()
     previous = json.loads(Path(args.previous).read_text(encoding='utf8')) if args.previous and Path(args.previous).exists() else None

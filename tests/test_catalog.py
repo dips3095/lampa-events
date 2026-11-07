@@ -55,6 +55,18 @@ class CatalogTests(unittest.TestCase):
         refs=[{'title':'UFC 233: Example','date':'2019-01-26','cancelled':True}]
         self.assertEqual(reconcile(rows, refs, {})['cancelledIds'], ['a'])
 
+    def test_reviewed_future_exception_is_exact_and_does_not_hide_primary(self):
+        refs = [{'title':'UFC Fight Night 297','date':'2027-01-23'}]
+        reviews = {'referenceExceptions': {'ufc fight night 297|2027-01-23':'Pending confirmation'}}
+        self.assertFalse(reconcile([], refs, reviews)['unmatchedReference'])
+        for changed in ({'title':'UFC Fight Night 298','date':'2027-01-23'},
+                        {'title':'UFC Fight Night 297','date':'2027-01-24'}):
+            self.assertEqual(reconcile([], [changed], reviews)['unmatchedReference'], [changed])
+        rows = [{'id':'sd-new','title':'UFC Fight Night 297','date':'2027-01-23','series':'fight-night'}]
+        report = reconcile(rows, refs, reviews)
+        self.assertEqual(report['matchedCount'], 1)
+        self.assertFalse(report['unmatchedSource'])
+
     def test_missing_year_or_removed_event_blocks_publication(self):
         from datetime import datetime, timezone
         entries=[{'id':str(y),'title':'Event','date':str(y)+'-01-01','series':'numbered','status':'completed','participants':['A','B'],'images':[]} for y in range(START_YEAR,datetime.now(timezone.utc).year+1)]

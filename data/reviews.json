@@ -1,5 +1,5 @@
 {
-  "reviewedOn": "2026-11-03",
+  "reviewedOn": "2026-11-07",
   "series": {},
   "matches": {
     "ufc brazil ultimate brazil|1998-10-16": {"id":"sd-27","reason":"Same date and event; Sherdog uses historical 17.5 numbering."},
@@ -11,7 +11,8 @@
     "ufc fight night overeem vs harris|2020-04-11": "Canceled block in independent event table; replacement on another date is a separate entry.",
     "ufc on espn ngannou vs rozenstruik|2020-03-28": "Canceled block in independent event table, never held on this date.",
     "ufc fight night woodley vs edwards|2020-03-21": "Canceled block in independent event table, never held on this date.",
-    "ufc fight night 296|2027-01-16": "Upcoming event present in independent table but absent in primary archive; explicit addition below."
+    "ufc fight night 296|2027-01-16": "Upcoming event present in independent table but absent in primary archive; explicit addition below.",
+    "ufc fight night 297|2027-01-23": "Reviewed 2026-11-07: not yet in the Sherdog archive. The Wikipedia article cites an unannounced event reported by Sports Illustrated, so defer inclusion pending confirmation. This exact title/date exception does not exclude a later primary-source entry. Sources: https://en.wikipedia.org/wiki/UFC_Fight_Night_297 ; https://www.si.com/fannation/mma/news/ufc-reportedly-targeting-another-january-2027-event-with-major-first-fight-news"
   },
   "sourceExceptions": {},
   "additions": [{

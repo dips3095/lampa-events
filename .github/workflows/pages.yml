@@ -84,6 +84,7 @@ jobs:
           path: |
             .cache/audit.json
             test-results/
+          include-hidden-files: true
           retention-days: 14
       - name: Save validated snapshot
         run: |
@@ -94,7 +95,12 @@ jobs:
           git -C .data-work add catalog.json details.json artwork.json wiki-posters.json audit.json
           if ! git -C .data-work diff --cached --quiet; then
             git -C .data-work commit -m 'Update validated event catalog'
-            git -C .data-work push origin HEAD:catalog-data
+            for attempt in 1 2 3; do
+              if git -C .data-work push origin HEAD:catalog-data; then break; fi
+              if [ "$attempt" -eq 3 ]; then exit 1; fi
+              echo "::warning::Snapshot push failed; retrying ($attempt/3)"
+              sleep "$((attempt * 5))"
+            done
           fi
       - uses: actions/configure-pages@v5
       - name: Prepare public files
