@@ -8,16 +8,19 @@ const sources={input:fixture('input.js'),keyboard:fixture('keyboard.js'),subscri
 (async()=>{
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,headless:true});
  try{
- for(const mode of ['simple','lampa','legacy','legacy-lampa']){
-  console.log('Keyboard mode:',mode);
+ for(const callbackDelay of [0,200])for(const mode of ['simple','lampa','legacy','legacy-lampa']){
+  console.log('Keyboard mode:',mode,'callback delay:',callbackDelay);
   const page=await browser.newPage({viewport:{width:1280,height:720}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const consoleErrors=[];page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text());});
+  let phase='setup';
+  try{
   await page.setContent('<div class="menu"><ul class="menu__list"></ul></div><main></main>');
   await page.addScriptTag({path:require.resolve('jquery/dist/jquery.js')});
   await page.addScriptTag({path:path.join(__dirname,'fixtures/lampa/simple-keyboard.js')});
   await page.addStyleTag({path:path.join(__dirname,'fixtures/lampa/style.css')});
   await page.addStyleTag({content:'body{font:20px Arial;background:#111;color:white}.settings-input{position:fixed;inset:0;background:#222;padding:3em}.simple-keyboard{position:relative;max-width:1000px;margin:auto}.simple-keyboard-input{display:block;width:85%;font-size:25px;padding:15px}.simple-keyboard-buttons{display:flex;gap:2em}.focus{outline:3px solid white}'});
-  await page.evaluate(({sources,mode})=>{
+  await page.evaluate(({sources,mode,callbackDelay})=>{
    window.mode=mode;window.appready=true;window.stored={};window.controllers={};window.controllerName='content';window.keypadEnabled=true;window.focused=null;window.collection=[];
    const module=(src,names,values)=>new Function(...names,src.replace(/^import .*$/gm,'').replace('export default','return'))(...values);
    const Subscribe=module(sources.subscribe,[],[]);
@@ -40,16 +43,21 @@ const sources={input:fixture('input.js'),keyboard:fixture('keyboard.js'),subscri
    const Noty={show:()=>{}};
    const Keyboard=module(sources.keyboard,['Controller','Subscribe','Noty','Platform','Android','Storage','Keypad','Lang','Layers','Arrays','Select','Utils'],[Controller,Subscribe,Noty,Platform,{},Storage,Keypad,Lang,Layers,Arrays,Select,Utils]);
    const hostInput=module(sources.input,['Template','Keybord','Controller','Select','Storage','Arrays','Noty','Lang','Utils'],[{get:()=>$(template)},Keyboard,Controller,Select,Storage,Arrays,Noty,Lang,Utils]);
-   const Input=mode.startsWith('legacy')?{edit:(p,cb)=>{hostInput.edit(p,cb);}}:hostInput;
+   // A closed panel can precede the deferred plugin callback on a busy runner.
+   const Input={edit:(p,cb)=>{const kb=hostInput.edit(p,value=>{if(callbackDelay)setTimeout(()=>cb(value),callbackDelay);else cb(value);});if(!mode.startsWith('legacy'))return kb;}};
    window.Lampa={Controller,Storage,Input,Select,Noty,Component:{add:(n,c)=>window.Catalog=c},Activity:{backward:()=>{},push:v=>window.pushed=v},
     Scroll:function(){const el=$('<div class="scroll"><div class="scroll__body"></div></div>');this.render=()=>el;this.body=()=>el.find('.scroll__body');this.append=e=>this.body().append(e);this.update=()=>{};this.destroy=()=>el.remove();},
     Reguest:function(){this.clear=()=>{};this.timeout=()=>{};this.native=(url,ok)=>setTimeout(()=>ok({schemaVersion:1,updatedAt:'2026-11-04T00:00:00Z',featured:[],events:[{id:'one',title:'Event 1',date:'2026-01-01',series:'numbered',status:'completed',participants:['A','B'],images:[]}]}),0);}};
-   window.enter=key=>{const el=$('[data-key="'+key+'"]');focus(el[0]);el.trigger('hover:enter');};
+   window.enter=key=>{if(controllerName!=='content')throw new Error('Catalog action before controller restoration: '+key);const el=$('[data-key="'+key+'"]');focus(el[0]);el.trigger('hover:enter');};
    document.addEventListener('keydown',e=>{if(!keypadEnabled)return;const dirs={ArrowDown:'down',ArrowUp:'up',ArrowLeft:'left',ArrowRight:'right'};if(dirs[e.key]){e.preventDefault();controllers[controllerName]?.[dirs[e.key]]?.();}if(e.key==='Enter'){e.preventDefault();$(focused).trigger('hover:enter');}if(e.key==='Escape'){e.preventDefault();Controller.back();}});
-  },{sources,mode});
+  },{sources,mode,callbackDelay});
   await page.addScriptTag({path:path.join(__dirname,'../events.js')});
   await page.evaluate(()=>{window.activity={};window.catalog=new Catalog(activity);$('main').append(catalog.create());catalog.start();});
   await page.waitForFunction(()=>document.querySelector('.events-card'));
+  // DOM removal alone does not mean Input.edit's deferred callback has resumed
+  // the catalog. A real user can reopen search only after control returns.
+  const waitForCatalog=()=>page.waitForFunction(()=>!document.querySelector('.settings-input')&&controllerName==='content'&&keypadEnabled);
+  phase='done';
   await page.evaluate(()=>enter('search'));
   assert.equal(await page.locator('.simple-keyboard-buttons .selector').count(),2);
   if(!mode.includes('lampa')){
@@ -62,29 +70,38 @@ const sources={input:fixture('input.js'),keyboard:fixture('keyboard.js'),subscri
   }
   assert.ok(await page.locator('.simple-keyboard-buttons__enter').evaluate(e=>e.classList.contains('focus')));
   await page.keyboard.press('Enter');
-  await page.waitForFunction(()=>!document.querySelector('.settings-input'));
+  await waitForCatalog();
   await page.waitForFunction(()=>activity.events_state.term);
   const saved=await page.evaluate(()=>activity.events_state.term);
   assert.equal(saved,!mode.includes('lampa')?'свободный запрос':'a');
   await page.evaluate(()=>enter('direct'));
   assert.equal(await page.evaluate(()=>pushed.search),saved);
   // Cancel must be reachable by D-pad and preserve the old query.
+  phase='cancel';
   await page.evaluate(()=>{catalog.start();enter('search');});
   if(!mode.includes('lampa'))await page.locator('.simple-keyboard-input').fill('отменённый запрос');
   await page.evaluate(()=>{document.activeElement.blur();Lampa.Controller.collectionSet($('.simple-keyboard'));Lampa.Controller.collectionFocus($('.simple-keyboard-buttons__enter')[0],$('.simple-keyboard'));});
   await page.keyboard.press('ArrowRight');
   assert.ok(await page.locator('.simple-keyboard-buttons__cancel').evaluate(e=>e.classList.contains('focus')));
   await page.keyboard.press('Enter');
-  await page.waitForFunction(()=>!document.querySelector('.settings-input'));
+  await waitForCatalog();
   assert.equal(await page.evaluate(()=>activity.events_state.term),saved);
   assert.equal(await page.evaluate(()=>keypadEnabled),true);
   // Physical Back also discards edits.
+  phase='back';
   await page.evaluate(()=>{enter('search');document.activeElement.blur();});
   await page.keyboard.press('Escape');
-  await page.waitForFunction(()=>!document.querySelector('.settings-input'));
+  await waitForCatalog();
   assert.equal(await page.evaluate(()=>activity.events_state.term),saved);
   assert.deepEqual(errors,[]);
-  await page.close();
+  }catch(error){
+   fs.mkdirSync('test-results',{recursive:true});
+   const prefix=path.join('test-results','keyboard-'+mode+'-'+callbackDelay);
+   const state=await page.evaluate(()=>({controller:window.controllerName,keypadEnabled:window.keypadEnabled,panelOpen:!!document.querySelector('.settings-input'),activeElement:document.activeElement?.outerHTML,focused:document.querySelector('.focus')?.outerHTML})).catch(()=>null);
+   fs.writeFileSync(prefix+'.json',JSON.stringify({phase,mode,callbackDelay,error:String(error),state,errors,consoleErrors},null,2));
+   await page.screenshot({path:prefix+'.png'}).catch(()=>{});
+   throw error;
+  }finally{await page.close();}
  }
  console.log('PASS real Lampa keyboards: D-pad Done/Cancel, Enter, physical Back, free query, focus and keypad restoration.');
  }finally{await browser.close();}
