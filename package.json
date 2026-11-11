@@ -1,6 +1,6 @@
 {
   "name": "lampa-events",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "scripts": {"test": "node --check events.js && node tests/smoke.cjs && node tests/keyboard.cjs"},
   "devDependencies": {"jquery": "3.7.1", "playwright": "1.56.1"}

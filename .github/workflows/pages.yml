@@ -3,7 +3,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 3,9,15,21 * * *'
   workflow_dispatch:
     inputs:
       full_refresh:
@@ -69,6 +69,7 @@ jobs:
           python scripts/catalog.py --previous .data-work/catalog.json --state .data-work/details.json "${args[@]}"
           python scripts/wiki_posters.py _site/data/catalog.json --state .data-work/wiki-posters.json
           python scripts/artwork.py _site/data/catalog.json --state .data-work/artwork.json
+          python scripts/enrich.py _site/data/catalog.json --state .data-work/enrichment.json
           python scripts/check_release.py _site/data/catalog.json
       - name: Save resumable source cache
         if: always() && steps.source-cache.outcome == 'success'
@@ -83,6 +84,7 @@ jobs:
           name: validation-report
           path: |
             .cache/audit.json
+            .cache/enrichment-report.json
             test-results/
           include-hidden-files: true
           retention-days: 14
@@ -92,7 +94,7 @@ jobs:
           cp .cache/audit.json .data-work/audit.json
           git -C .data-work config user.name 'github-actions[bot]'
           git -C .data-work config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C .data-work add catalog.json details.json artwork.json wiki-posters.json audit.json
+          git -C .data-work add catalog.json details.json artwork.json wiki-posters.json enrichment.json audit.json
           if ! git -C .data-work diff --cached --quiet; then
             git -C .data-work commit -m 'Update validated event catalog'
             for attempt in 1 2 3; do

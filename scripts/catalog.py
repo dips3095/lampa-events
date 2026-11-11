@@ -187,13 +187,17 @@ def reconcile(events, reference, reviews):
 
 
 def validate(catalog, previous=None):
-    if catalog.get('schemaVersion') != 1 or not isinstance(catalog.get('events'), list):
+    if catalog.get('schemaVersion') not in (1, 2) or not isinstance(catalog.get('events'), list):
         raise ValueError('Unsupported catalog schema')
     events = catalog['events']
     ids = set()
     years = Counter()
     today = datetime.now(timezone.utc).date().isoformat()
     allowed = {'id', 'title', 'date', 'series', 'source', 'status', 'participants', 'images', 'sources'}
+    if catalog['schemaVersion'] == 2:
+        from detail_schema import EVENT_FIELDS, validate_details
+        allowed |= EVENT_FIELDS
+        validate_details(catalog)
     for e in events:
         if set(e) - allowed or e['id'] in ids or not e['title'] or e['series'] in ('unknown', 'excluded'):
             raise ValueError('Invalid or duplicate event: ' + e.get('id', '?'))
@@ -309,7 +313,7 @@ def main():
     for i, e in enumerate(selected):
         recent = e['date'] >= (today - timedelta(days=30)).isoformat()
         # Leave room for scheduler jitter: an early run must not defer refresh another day.
-        age = 0 if args.full else (23 * 3600 if recent else 6 * 86400)
+        age = 0 if args.full else (5 * 3600 if recent else 6 * 86400)
         cached = detail_state.get(e['id'], {})
         if cached and time.time() - cached.get('fetchedAt', 0) < age and cached['event']['date'] == e['date'] and cached['event']['title'] == e['title']:
             value = dict(cached['event'])
