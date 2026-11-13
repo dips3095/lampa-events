@@ -55,7 +55,8 @@ def validate_details(catalog):
         seen = set()
         for fight in fights:
             require(isinstance(fight, dict) and not set(fight) - {'id', 'fighters', 'section', 'weightClass', 'result'}, 'Unknown fight fields')
-            require(isinstance(fight.get('id'), str) and fight['id'] not in seen, 'Duplicate fight')
+            require(isinstance(fight.get('id'), str) and fight['id'] not in seen,
+                    f"Invalid or duplicate fight in {event.get('id', '?')}: {fight.get('id')}")
             seen.add(fight['id'])
             pair = fight.get('fighters')
             require(isinstance(pair, list) and len(pair) == 2 and pair[0] != pair[1] and all(fid in fighters for fid in pair), 'Invalid fighter references')

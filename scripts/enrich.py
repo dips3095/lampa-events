@@ -47,6 +47,21 @@ def identity(name):
     return ' '.join(sorted(norm(name).split()))
 
 
+def unique_fights(fights):
+    """Collapse repeated source rows, rejecting contradictory copies of a bout."""
+    unique = {}
+    for fight in fights:
+        previous = unique.get(fight['id'])
+        if previous is not None:
+            # Red/blue or left/right presentation is not part of bout identity.
+            if {**previous, 'fighters': sorted(previous['fighters'])} != {**fight, 'fighters': sorted(fight['fighters'])}:
+                raise ValueError('Conflicting duplicate fight: ' + fight['id'])
+            print('Detail warning: Repeated source fight: ' + fight['id'], flush=True)
+        else:
+            unique[fight['id']] = fight
+    return list(unique.values())
+
+
 def parse_sherdog(html, event):
     soup = BeautifulSoup(html, 'html.parser')
     date = soup.select_one('.event_detail [itemprop="startDate"]')
@@ -96,7 +111,7 @@ def parse_sherdog(html, event):
         fights.append(fight)
     if not fights and event['participants']:
         raise ValueError('Sherdog fight markup unavailable')
-    return {'fights': fights, 'venue': text(soup.select_one('.event_detail [itemprop="location"]')),
+    return {'fights': unique_fights(fights), 'venue': text(soup.select_one('.event_detail [itemprop="location"]')),
             'detailSource': event['source']}, fighters
 
 
@@ -199,6 +214,7 @@ def parse_ufc(html, event, known_fighters=None, aliases=None):
             pass
     img = hero.select_one('.c-hero__image img[src]')
     image = https_url(img['src'], UFC) if img else ''
+    fights = unique_fights(fights)
     destination_aliases.update(aliases)
     return {'fights': fights, 'venue': text(hero.select_one('.field--name-venue')), 'startTime': start.isoformat(),
             'sectionTimes': times, 'heroImages': [image] if image else []}, fighters
@@ -304,7 +320,7 @@ def main():
                     details, people = parse_sherdog(html, event)
                     fetched_at = fetch.fetched_at
                 except (ValueError, RuntimeError, OSError) as exc:
-                    if recent:
+                    if recent or 'Conflicting duplicate fight' in str(exc):
                         failures.append(event['id'] + ' primary: ' + str(exc))
                 candidates = [v['url'] for v in official_index if abs((datetime.fromtimestamp(v['timestamp'], timezone.utc).date() - datetime.fromisoformat(event['date']).date()).days) <= 1]
                 n = number(event['title'])
@@ -336,7 +352,7 @@ def main():
                         merge_fighters(people, new_people)
                         break
                     except (ValueError, RuntimeError, OSError) as exc:
-                        if recent:
+                        if recent or 'Conflicting duplicate fight' in str(exc):
                             failures.append(event['id'] + ' official: ' + str(exc))
                 if details:
                     if cached.get('details', {}).get('detailSource', '').startswith(UFC) and not details.get('detailSource', '').startswith(UFC):
@@ -392,9 +408,9 @@ def main():
     catalog['fighters'] = {fid: {k: v for k, v in f.items() if k != 'profileFetchedAt'} for fid, f in state['fighters'].items()}
     catalog['detailsCoverage'] = {'events': sum(bool(e.get('fights')) for e in catalog['events']), 'fighters': len(catalog['fighters'])}
     from catalog import validate
+    write_json(Path('.cache/enrichment-report.json'), {'at': iso_now(), 'coverage': catalog['detailsCoverage'], 'warnings': failures})
     validate(catalog)
     write_json(catalog_path, catalog)
-    write_json(Path('.cache/enrichment-report.json'), {'at': iso_now(), 'coverage': catalog['detailsCoverage'], 'warnings': failures})
     print(json.dumps({'coverage': catalog['detailsCoverage'], 'warnings': len(failures)}, ensure_ascii=False), flush=True)
     for message in failures[:12]:
         print('Detail warning: ' + message, flush=True)
