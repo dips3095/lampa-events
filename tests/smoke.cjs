@@ -27,6 +27,18 @@ for(const i of [79,80]){
  fixture.events[i].sectionTimes={main:fixture.events[i].startTime};
 }
 fixture.events[79].fights[0].result={outcome:'win',winner:'f1',method:'UNIQUE_RESULT_METHOD',round:'2',time:'3:04'};
+fixture.events[80].sectionTimes.early='2026-03-25T21:00:00Z';
+// Published flags can remain stale while the local clock crosses the event boundary.
+const timed={...fixture.events[80],date:'2026-11-14',startTime:'2026-11-15T02:00:00Z',sectionTimes:{early:'2026-11-14T22:00:00Z'}};
+for(const zone of ['Europe/Moscow','America/Los_Angeles']){
+ process.env.TZ=zone;
+ assert.equal(helpers.eventStatus(timed,Date.parse('2026-11-14T21:59:59Z')),'upcoming');
+ assert.equal(helpers.eventStatus(timed,Date.parse('2026-11-14T22:00:00Z')),'completed');
+ assert.equal(helpers.eventStatus({...timed,status:'cancelled'},Date.parse('2026-11-16T00:00:00Z')),'cancelled');
+ assert.equal(helpers.eventStatus({...timed,status:'completed'},Date.parse('2026-11-14T21:00:00Z')),'upcoming');
+ assert.equal(helpers.eventStatus({date:'2026-11-14',status:'upcoming'},Date.parse('2026-11-15T00:00:00Z')),'completed');
+ assert.equal(helpers.eventStatus({date:'2026-11-14',status:'upcoming'},Date.parse('2026-11-14T23:59:59Z')),'upcoming');
+}
 process.env.TZ='Europe/Moscow';
 assert.equal(helpers.localTime('2026-11-14T23:00:00Z'),'15.11.2026 · 02:00 МСК');
 assert.equal(helpers.localTime('2026-11-14'),'Время не объявлено');
@@ -48,6 +60,7 @@ assert.ok(!helpers.valid({...fixture,events:[fixture.events[0],fixture.events[0]
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,headless:true});
  try {
  const page=await browser.newPage({viewport:{width:1280,height:720},timezoneId:'Europe/Moscow'});
+ await page.clock.install({time:new Date('2026-03-25T12:00:00Z')});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('https://images.test/**',route=>route.request().url().includes('broken')?route.fulfill({status:404,body:''}):route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#345678"/></svg>'}));
  await page.setContent('<div class="menu"><ul class="menu__list"></ul></div><main></main>');
@@ -194,11 +207,43 @@ assert.ok(!helpers.valid({...fixture,events:[fixture.events[0],fixture.events[0]
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.evaluate(()=>enter('home'));
  }
- // Legacy lazy-load fallback and persistent cache survive reopening with no network.
+ // The open event switches at the first confirmed section start without a request.
+ await page.clock.pauseAt(new Date('2026-03-25T20:59:59Z'));
+ await page.evaluate(()=>{window.failRequest=true;enter('home');enter('hero:event-80');});
+ assert.equal(await page.locator('[data-key="record"]').count(),0);
+ await page.clock.runFor(1000);
+ assert.equal(await page.locator('[data-key="record"]').count(),1);
+ assert.equal(await page.locator('.events-eyebrow').innerText(),'ТУРНИР UFC');
+ assert.equal(await page.locator('.events-result').count(),0);
+ await page.evaluate(()=>{enter('record');pick('title');catalog.start();enter('home');});
+ assert.equal(await page.evaluate(()=>pushed.search),'EVENT 180');
+ assert.equal(await page.locator('[data-key="hero:event-80"]').count(),0);
+ assert.equal(await page.locator('[data-key="recent:event-80"]').count(),1);
+ // A clock boundary cannot steal focus from the keyboard; resume applies the change.
+ await page.clock.setSystemTime(new Date('2026-03-25T20:59:59Z'));
+ await page.evaluate(()=>{enter('home');enter('search');window.beforeClockFocus=focusCalls;});
+ await page.clock.runFor(1000);
+ assert.equal(await page.evaluate(()=>focusCalls),await page.evaluate(()=>beforeClockFocus));
+ assert.equal(await page.evaluate(()=>controllerName),'keyboard');
+ await page.evaluate(()=>inputCallback(''));
+ await page.clock.runFor(10);
+ await page.evaluate(()=>enter('home'));
+ assert.equal(await page.locator('[data-key="recent:event-80"]').count(),1);
+ // A stopped activity also catches up on return, without touching another controller.
+ await page.clock.setSystemTime(new Date('2026-03-25T20:59:59Z'));
+ await page.evaluate(()=>{enter('home');catalog.stop();window.beforeClockFocus=focusCalls;});
+ await page.clock.runFor(1000);
+ assert.equal(await page.evaluate(()=>focusCalls),await page.evaluate(()=>beforeClockFocus));
+ await page.evaluate(()=>catalog.start());
+ assert.equal(await page.locator('[data-key="recent:event-80"]').count(),1);
+ // Legacy lazy-load fallback and stale persistent cache survive reopening with no network.
  await page.evaluate(()=>{catalog.destroy();window.IntersectionObserver=undefined;window.failRequest=true;window.catalog=new Catalog({});$('main').append(catalog.create());catalog.start();});
+ await page.clock.runFor(10);
  await page.waitForFunction(()=>$('.events-status').text().includes('сохранённый'));
  assert.ok(await page.locator('.events-card').count()>0);
  assert.equal(await page.locator('[data-key="followed:f1"]').count(),1);
+ assert.equal(await page.locator('[data-key="hero:event-80"]').count(),0);
+ assert.equal(await page.locator('[data-key="recent:event-80"]').count(),1);
  await page.evaluate(()=>catalog.destroy());
  assert.equal(await page.locator('.events-catalog').count(),0);
  assert.deepEqual(errors,[]);

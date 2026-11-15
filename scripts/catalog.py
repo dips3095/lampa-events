@@ -59,6 +59,16 @@ def number(title):
     return int(found[1]) if found else None
 
 
+def event_status(event, now):
+    if event.get('status') == 'cancelled':
+        return 'cancelled'
+    values = [event.get('startTime')] + [event.get('sectionTimes', {}).get(k) for k in ('main', 'prelims', 'early')]
+    starts = [datetime.fromisoformat(v.replace('Z', '+00:00')) for v in values if v]
+    if starts:
+        return 'upcoming' if now < min(starts) else 'completed'
+    return 'completed' if event['date'] < now.date().isoformat() else event.get('status', 'upcoming')
+
+
 def parse_archive(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     events = []
@@ -324,6 +334,7 @@ def main():
             detail_state[e['id']] = {'fetchedAt': fetch.fetched_at, 'event': value}
             write_json(state_path, detail_state)
         value = dict(value)
+        value['status'] = event_status(value, datetime.now(timezone.utc))
         value['sources'] = list(dict.fromkeys(value['sources'] + ([audit['referencePages'][e['id']]] if e['id'] in audit['referencePages'] else [])))
         result.append(value)
         if i % 20 == 0:

@@ -1,4 +1,4 @@
-/* Lampa Events v0.3.0. Stable entry point; catalog updates independently. */
+/* Lampa Events v0.3.1. Stable entry point; catalog updates independently. */
 (function () {
     'use strict';
     var DATA_URL = 'https://dips3095.github.io/lampa-events/data/catalog.json';
@@ -17,6 +17,22 @@
         return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+d.getFullYear()+' · '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+' '+zone;
     }
     function eventDate(e){return e.startTime?localTime(e.startTime):e.date.split('-').reverse().join('.')+' · дата организатора';}
+    function eventStart(e){
+        var values=[e.startTime],times=e.sectionTimes||{};
+        ['main','prelims','early'].forEach(function(key){values.push(times[key]);});
+        var starts=values.filter(validTime).map(function(value){return Date.parse(value);});
+        return starts.length?Math.min.apply(Math,starts):NaN;
+    }
+    function eventBoundary(e){
+        var start=eventStart(e);
+        return isNaN(start)?Date.parse(e.date+'T00:00:00Z')+86400000:start;
+    }
+    function eventStatus(e,now){
+        if(e.status==='cancelled')return 'cancelled';
+        now=now===undefined?Date.now():now;
+        if(now>=eventBoundary(e))return 'completed';
+        return isNaN(eventStart(e))?e.status:'upcoming';
+    }
     function validDetails(data){
         var fighters=data.fighters||{};
         if(!fighters||typeof fighters!=='object'||Array.isArray(fighters))return false;
@@ -55,7 +71,7 @@
     function matches(e,term,f) {
         var y = Number(e.date.slice(0,4));
         if(f.year&&y!==Number(f.year))return false;
-        if (f.from && y<f.from || f.to && y>f.to || f.month && Number(e.date.slice(5,7))!==f.month || f.series && e.series!==f.series || f.status && e.status!==f.status) return false;
+        if (f.from && y<f.from || f.to && y>f.to || f.month && Number(e.date.slice(5,7))!==f.month || f.series && e.series!==f.series || f.status && eventStatus(e)!==f.status) return false;
         if(!String(term||'').trim())return true;
         var hay = normalize(e.title+' '+e.date+' '+e.participants.join(' '));
         return normalize(term).split(' ').every(function(t){return !t || (/^\d+$/.test(t) ? (' '+hay+' ').indexOf(' '+t+' ')>=0 : hay.indexOf(t)>=0);});
@@ -69,7 +85,7 @@
         var copy={schemaVersion:data.schemaVersion,startYear:START_YEAR,updatedAt:data.updatedAt,featured:data.featured.slice(),fighters:data.fighters||{},events:data.events.filter(function(e){return Number(e.date.slice(0,4))>=START_YEAR;})};
         return valid(copy)?copy:null;
     }
-    if (typeof module !== 'undefined' && module.exports) module.exports = {normalize:normalize,valid:valid,matches:matches,eventQuery:eventQuery,scopeCatalog:scopeCatalog,localTime:localTime,eventDate:eventDate,weightName:weightName};
+    if (typeof module !== 'undefined' && module.exports) module.exports = {normalize:normalize,valid:valid,matches:matches,eventQuery:eventQuery,scopeCatalog:scopeCatalog,localTime:localTime,eventDate:eventDate,weightName:weightName,eventStatus:eventStatus,eventBoundary:eventBoundary};
     if (typeof window === 'undefined') return;
     if (window.events_catalog_loaded || window.events_catalog_loading) return;
     window.events_catalog_loading = true;
@@ -95,6 +111,20 @@
         ['from','to'].forEach(function(key){if(state.filters[key]&&state.filters[key]<START_YEAR)state.filters[key]=START_YEAR;});
         if(!Array.isArray(favorites)) favorites=[];
         var active=false,dead=false,started=false,modal=false,dirty=false,ticket=0,last=null,observer,statusText='',positions={},imageEpoch=0;
+        var statusTimer,shownStatuses='';
+        function statuses(){return catalog?catalog.events.map(function(e){return eventStatus(e);}).join(','):'';}
+        function scheduleTimeCheck(){
+            clearTimeout(statusTimer);if(dead)return;
+            var now=Date.now(),delay=60000;
+            if(catalog)catalog.events.forEach(function(e){var at=eventBoundary(e);if(e.status!=='cancelled'&&at>now)delay=Math.min(delay,at-now);});
+            statusTimer=setTimeout(checkTime,Math.max(1,delay));
+        }
+        function checkTime(){
+            if(dead)return;
+            if(statuses()!==shownStatuses){dirty=true;if(active)draw();}
+            scheduleTimeCheck();
+        }
+        window.addEventListener('focus',checkTime);document.addEventListener('visibilitychange',checkTime);
         root.append(scroll.render());if(scroll.minus) scroll.minus();
         function canFocus(){return active && !dead && !modal && (!L.Controller.enabled || L.Controller.enabled().name==='content');}
         function focus(){
@@ -198,14 +228,14 @@
         function heading(label,parent){(parent||scroll.body()).append($('<h2 class="events-heading"></h2>').text(label));}
         function hero(event,home){
             var wrap=$('<div class="events-hero"></div>').toggleClass('is-home',home),copy=$('<div class="events-hero-copy"></div>');
-            copy.append($('<div class="events-eyebrow"></div>').text(home?'БЛИЖАЙШИЙ ТУРНИР':event.status==='cancelled'?'ТУРНИР ОТМЕНЁН':event.status==='upcoming'?'СКОРО В UFC':'ТУРНИР UFC'));
+            copy.append($('<div class="events-eyebrow"></div>').text(home?'БЛИЖАЙШИЙ ТУРНИР':eventStatus(event)==='cancelled'?'ТУРНИР ОТМЕНЁН':eventStatus(event)==='upcoming'?'СКОРО В UFC':'ТУРНИР UFC'));
             copy.append($('<h1></h1>').text(event.title));copy.append($('<div class="events-hero-meta"></div>').text(eventDate(event)));
             if(event.venue)copy.append($('<div class="events-venue"></div>').text(event.venue));
             if(!event.startTime)copy.append($('<div class="events-hero-meta"></div>').text('Время не объявлено'));
             var actions=group('hero-actions',false);
             if(home)button('Состав турнира','hero:'+event.id,function(){select(event);},actions).addClass('events-primary');
             else{
-                if(event.status==='completed')button('Найти запись','record',function(){recordMenu(event);},actions).addClass('events-primary');
+                if(eventStatus(event)==='completed')button('Найти запись','record',function(){recordMenu(event);},actions).addClass('events-primary');
                 button(favorites.indexOf(event.id)>=0?'Убрать из списка':'Посмотреть позже','watch',function(){toggleWatch(event);},actions);
             }
             copy.append(actions);wrap.append(copy);
@@ -223,14 +253,14 @@
             heading('Мои бойцы');
             if(!available.length){hint(followed.length?'Профили избранных бойцов пока недоступны в этом каталоге.':'Откройте бойца в составе турнира и нажмите «Следить».');return;}
             var rail=group('followed',true).addClass('events-followed');scroll.append(rail);
-            available.forEach(function(f){var el=fighterButton(f,rail,'followed:'+f.id);var next=fighterEvents(f.id).filter(function(e){return e.status==='upcoming';}).sort(function(a,b){return a.date.localeCompare(b.date);})[0];var pair=next&&(next.fights||[]).filter(function(b){return b.fighters.indexOf(f.id)>=0;})[0],opponent=pair&&catalog.fighters[pair.fighters[0]===f.id?pair.fighters[1]:pair.fighters[0]];el.append($('<small></small>').text(next?'Против '+opponent.name+' · '+eventDate(next):'Следующий бой не найден в опубликованных кардах'));});
+            available.forEach(function(f){var el=fighterButton(f,rail,'followed:'+f.id);var next=fighterEvents(f.id).filter(function(e){return eventStatus(e)==='upcoming';}).sort(function(a,b){return a.date.localeCompare(b.date);})[0];var pair=next&&(next.fights||[]).filter(function(b){return b.fighters.indexOf(f.id)>=0;})[0],opponent=pair&&catalog.fighters[pair.fighters[0]===f.id?pair.fighters[1]:pair.fighters[0]];el.append($('<small></small>').text(next?'Против '+opponent.name+' · '+eventDate(next):'Следующий бой не найден в опубликованных кардах'));});
         }
         function drawEvent(event){
             hero(event,false);
             var fights=event.fights||[];
             if(event.detailsUpdatedAt)hint('Состав проверен '+localTime(event.detailsUpdatedAt)+'. Возможны изменения.');
             if(!fights.length){
-                heading('Состав турнира');hint(event.status==='cancelled'?'Событие отменено.':'Подробный кард пока недоступен. Известные участники: '+(event.participants.join(', ')||'состав уточняется')+'.');
+                heading('Состав турнира');hint(eventStatus(event)==='cancelled'?'Событие отменено.':'Подробный кард пока недоступен. Известные участники: '+(event.participants.join(', ')||'состав уточняется')+'.');
                 return;
             }
             var sections=['main','prelims','early','unknown'].filter(function(s){return fights.some(function(f){return f.section===s;});});
@@ -239,7 +269,7 @@
             sections.forEach(function(s){button(s==='unknown'&&sections.length===1?'Все бои':sectionNames[s],'section:'+s,function(){state.cardSection=s;state.key='section:'+s;draw();},tabs).toggleClass('is-active',state.cardSection===s);});scroll.append(tabs);
             var time=event.sectionTimes&&event.sectionTimes[state.cardSection];hint(time?'Начало: '+localTime(time):'Время этой части карда не объявлено');
             if(state.cardSection==='unknown')hint('Источник не разделяет эти бои на основной кард и прелимы.');
-            if(event.status!=='upcoming'&&event.status!=='cancelled'){
+            if(eventStatus(event)==='completed'){
                 var controls=group('results',false);button(showsResults(event)?'Скрыть результаты':'Показать результаты','results',function(){revealed[event.id]=!showsResults(event);draw();},controls);scroll.append(controls);
             }
             fights.filter(function(f){return f.section===state.cardSection;}).forEach(function(f,i){
@@ -247,7 +277,7 @@
                 fighterButton(catalog.fighters[f.fighters[0]],row,'fight:'+f.id+':0');
                 row.append($('<div class="events-versus"><b>VS</b><small></small></div>').find('small').text(weightName(f.weightClass)).end());
                 fighterButton(catalog.fighters[f.fighters[1]],row,'fight:'+f.id+':1');wrap.append(row);
-                if(showsResults(event)&&event.status==='completed')wrap.append($('<div class="events-result"></div>').text(resultText(f)));
+                if(showsResults(event)&&eventStatus(event)==='completed')wrap.append($('<div class="events-result"></div>').text(resultText(f)));
                 scroll.append(wrap);
             });
         }
@@ -258,10 +288,10 @@
             items.forEach(function(t){copy.append($('<p></p>').text(t));});
             var actions=group('profile-actions',false);button(followed.indexOf(fighter.id)>=0?'Не следить':'Следить','follow',function(){if(followed.indexOf(fighter.id)>=0)followed=followed.filter(function(id){return id!==fighter.id;});else followed.push(fighter.id);if(!save('events_fighters_v1',followed)&&L.Noty)L.Noty.show('Не удалось сохранить избранных бойцов');draw();},actions).addClass('events-primary');copy.append(actions);
             wrap.append(photo).append(copy);scroll.append(wrap);artwork(fighter,photo,wrap);
-            var events=fighterEvents(fighter.id),next=events.filter(function(e){return e.status==='upcoming';}).sort(function(a,b){return a.date.localeCompare(b.date);});
+            var events=fighterEvents(fighter.id),next=events.filter(function(e){return eventStatus(e)==='upcoming';}).sort(function(a,b){return a.date.localeCompare(b.date);});
             heading('Следующий бой');if(next.length){var upcomingPair=next[0].fights.filter(function(f){return f.fighters.indexOf(fighter.id)>=0;})[0],opponentId=upcomingPair.fighters[0]===fighter.id?upcomingPair.fighters[1]:upcomingPair.fighters[0];section('Против '+catalog.fighters[opponentId].name,'fighter-next',next.slice(0,1));}else hint('Следующий бой не найден в опубликованных кардах.');
             heading('История выступлений в UFC');hint('Показаны поединки из доступных подробных кардов с 2010 года. История может быть неполной.');
-            var past=events.filter(function(e){return e.status==='completed';}).sort(function(a,b){return b.date.localeCompare(a.date);});
+            var past=events.filter(function(e){return eventStatus(e)==='completed';}).sort(function(a,b){return b.date.localeCompare(a.date);});
             if(!past.length)hint('История поединков пока не загружена.');
             past.slice(0,state.limit).forEach(function(e){
                 (e.fights||[]).filter(function(f){return f.fighters.indexOf(fighter.id)>=0;}).forEach(function(f){
@@ -289,7 +319,7 @@
             var cover=$('<div class="events-poster"><div class="events-cover"><span class="events-cover-label">UFC · АФИША НЕДОСТУПНА</span><strong></strong><span class="events-cover-date"></span></div></div>');
             cover.find('strong').text(event.title);cover.find('.events-cover-date').text(event.date);
             el.append(cover).append($('<div class="events-title"></div>').text(event.title));
-            el.append($('<div class="events-date"></div>').text(eventDate(event)+(event.status==='upcoming'?' · Скоро':event.status==='cancelled'?' · Отменён':'')));
+            el.append($('<div class="events-date"></div>').text(eventDate(event)+(eventStatus(event)==='upcoming'?' · Скоро':eventStatus(event)==='cancelled'?' · Отменён':'')));
             if(section==='best')el.append($('<div class="events-note"></div>').text(featuredNote(event)));
             artwork({images:section==='catalog'?event.images:(event.heroImages||[]).concat(event.images)},cover,el);
         }
@@ -300,7 +330,7 @@
         function draw(){
             if(dead)return;
             if(modal||(active&&L.Controller.enabled&&L.Controller.enabled().name!=='content')){dirty=true;return;}
-            dirty=false;imageEpoch++;if(observer)observer.disconnect();observer=null;last=null;scroll.body().empty();
+            dirty=false;shownStatuses=statuses();scheduleTimeCheck();imageEpoch++;if(observer)observer.disconnect();observer=null;last=null;scroll.body().empty();
             if(window.IntersectionObserver)observer=new window.IntersectionObserver(function(entries){entries.forEach(function(entry){if(entry.isIntersecting){observer.unobserve(entry.target);entry.target.loadArtwork();}});},{root:root[0],rootMargin:'250px'});
             var top=$('<div class="events-top"></div>').append($('<div class="events-brand"><b>UFC</b> EVENTS</div>'));
             var toolbar=group('toolbar',false);
@@ -325,11 +355,11 @@
             }
             var events=catalog.events.slice().sort(function(a,b){return b.date.localeCompare(a.date)||a.id.localeCompare(b.id);});
             if(state.view==='home'){
-                var upcoming=events.filter(function(e){return e.status==='upcoming';}).reverse();
+                var upcoming=events.filter(function(e){return eventStatus(e)==='upcoming';}).reverse();
                 if(upcoming.length)hero(upcoming[0],true);else hint('Новые турниры пока не найдены в опубликованном расписании.');
                 section('Следующие турниры','soon',upcoming.slice(1,13));
                 followedSection();
-                section('Недавние турниры','recent',events.filter(function(e){return e.status==='completed';}).slice(0,12));
+                section('Недавние турниры','recent',events.filter(function(e){return eventStatus(e)==='completed';}).slice(0,12));
                 scroll.append($('<div class="events-curation-info"></div>').text('Знаковые турниры — авторская подборка из разных лет. Причина выбора указана на карточке.'));
                 section('Знаковые турниры','best',events.filter(function(e){return catalog.featured.indexOf(e.id)>=0;}));
                 section('Посмотреть позже','saved',events.filter(function(e){return favorites.indexOf(e.id)>=0;}));
@@ -379,10 +409,10 @@
         this.start=function(){
             if(dead)return;active=true;
             L.Controller.add('content',{toggle:focus,update:function(){},left:function(){move('left');},right:function(){move('right');},up:function(){move('up');},down:function(){move('down');},back:back});
-            L.Controller.toggle('content');if(!started){started=true;draw();load(false);}else if(dirty)draw();
+            L.Controller.toggle('content');if(!started){started=true;draw();load(false);}else if(dirty||statuses()!==shownStatuses)draw();
         };
         this.pause=this.stop=function(){active=false;};
-        this.destroy=function(){dead=true;ticket++;imageEpoch++;net.clear();if(observer)observer.disconnect();scroll.destroy();root.remove();};
+        this.destroy=function(){dead=true;clearTimeout(statusTimer);window.removeEventListener('focus',checkTime);document.removeEventListener('visibilitychange',checkTime);ticket++;imageEpoch++;net.clear();if(observer)observer.disconnect();scroll.destroy();root.remove();};
     }
     function install(){
         window.Lampa.Component.add('events_catalog',Catalog);

@@ -136,7 +136,7 @@ class DetailTests(unittest.TestCase):
         html, event = self.official()
         detail, fighters = parse_ufc(html, event)
         detail.update(detailSource='https://www.ufc.com/event/ufc-322', detailsUpdatedAt='2025-11-16T04:00:00+00:00')
-        event.update(source='https://www.sherdog.com/events/Test-322', series='numbered', status='completed', images=[], sources=[])
+        event.update(source='https://www.sherdog.com/events/Test-322', series='numbered', status='upcoming', images=[], sources=[])
         # Basic archive coverage, with one known detailed event and one future
         # event for which neither source is available. No network is permitted.
         events = [{'id': str(y), 'title': 'Cancelled event', 'date': str(y)+'-01-01', 'series': 'numbered', 'status': 'cancelled', 'participants': [], 'images': [], 'source': 'https://example.com/'+str(y)} for y in range(2010,datetime.now(timezone.utc).year+1)]
@@ -170,6 +170,7 @@ class DetailTests(unittest.TestCase):
             output = json.loads((root/'catalog.json').read_text(encoding='utf8'))
             saved = next(e for e in output['events'] if e['id'] == event['id'])
             self.assertEqual(saved['detailsUpdatedAt'], detail['detailsUpdatedAt'])
+            self.assertEqual(saved['status'], 'completed')
             self.assertEqual(saved['fights'], detail['fights'])
             self.assertTrue({f['name'] for f in fighters.values()} <= set(saved['participants']))
             self.assertEqual(output['schemaVersion'], 2)

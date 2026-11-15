@@ -16,7 +16,7 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from catalog import Fetcher, norm, number, text, write_json
+from catalog import Fetcher, norm, number, text, write_json, event_status
 
 UFC = 'https://www.ufc.com'
 SECTIONS = {'main-card': 'main', 'prelims-card': 'prelims', 'early-prelims': 'early',
@@ -371,8 +371,6 @@ def main():
             event.pop(field, None)
         if cached:
             event.update(deepcopy(cached['details']))
-            if event.get('startTime') and event['status'] != 'cancelled' and datetime.fromisoformat(event['startTime']) > now:
-                event['status'] = 'upcoming'
             for fight in event.get('fights', []):
                 for fid in fight['fighters']:
                     if fight['weightClass'] and fid in state['fighters']:
@@ -384,6 +382,7 @@ def main():
             event['participants'] = sorted(set(event['participants']) | {
                 state['fighters'][fid]['name'] for fight in event.get('fights', []) for fid in fight['fighters']
             }, key=norm)
+        event['status'] = event_status(event, now)
         if index % 50 == 0:
             print(f'Detail enrichment {index + 1}/{len(ordered)}', flush=True)
     profiles = 0

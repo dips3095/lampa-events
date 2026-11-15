@@ -3,11 +3,23 @@ import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from catalog import START_YEAR, classify, parse_archive, parse_detail, scoped_page, reconcile, norm, validate
+from catalog import START_YEAR, classify, parse_archive, parse_detail, scoped_page, reconcile, norm, validate, event_status
 from artwork import matching
 
 
 class CatalogTests(unittest.TestCase):
+    def test_event_status_uses_confirmed_time_and_preserves_cancellations(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 11, 15, 0, tzinfo=timezone.utc)
+        event = {'date': '2026-11-14', 'status': 'upcoming', 'startTime': '2026-11-15T02:00:00Z'}
+        self.assertEqual(event_status(event, now), 'upcoming')
+        self.assertEqual(event_status(event, datetime(2026, 11, 15, 2, tzinfo=timezone.utc)), 'completed')
+        self.assertEqual(event_status({**event, 'sectionTimes': {'early': '2026-11-14T22:00:00Z'}}, now), 'completed')
+        self.assertEqual(event_status({**event, 'status': 'completed'}, now), 'upcoming')
+        self.assertEqual(event_status({**event, 'status': 'cancelled'}, now), 'cancelled')
+        self.assertEqual(event_status({'date': '2026-11-14', 'status': 'upcoming'}, now), 'completed')
+        self.assertEqual(event_status({'date': '2026-11-15', 'status': 'upcoming'}, now), 'upcoming')
+
     def test_classification(self):
         self.assertEqual(classify('UFC 18 - The Road to the Heavyweight Title'), 'numbered')
         self.assertEqual(classify('UFC - Road to UFC Season 5'), 'excluded')

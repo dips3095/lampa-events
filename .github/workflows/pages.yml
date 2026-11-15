@@ -108,7 +108,16 @@ jobs:
       - name: Prepare public files
         run: cp events.js index.html _site/
       - uses: actions/upload-pages-artifact@v3
+        id: pages-artifact
         with:
           path: _site
-      - uses: actions/deploy-pages@v4
+      - name: Deploy uploaded Pages artifact
+        uses: actions/github-script@v7
         id: deployment
+        env:
+          PAGES_ARTIFACT_ID: ${{ steps.pages-artifact.outputs.artifact_id }}
+        with:
+          script: |
+            await require('./scripts/deploy_pages.cjs')({
+              github, core, context, artifactId: process.env.PAGES_ARTIFACT_ID
+            });
