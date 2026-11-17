@@ -58,6 +58,8 @@ Lampa сохраняет последний каталог, «Посмотрет
 
 Требования: Python 3.11+, Node.js 22, pnpm 11.25.0.
 
+Для Actions закреплена Ubuntu 24.04, совместимая с Playwright 1.56.1. Образ ОС обновляется отдельно с проверкой совместимости браузерных зависимостей.
+
 ```sh
 pip install -r requirements.txt
 pnpm install --frozen-lockfile
